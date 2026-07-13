@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DH Editorial Intelligence</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">DH</span>
+          <div>
+            <h1>Editorial Intelligence</h1>
+            <p>Newsroom desk</p>
+          </div>
+        </div>
+
+        <form id="filters" class="filters">
+          <label>
+            Search
+            <input id="search" name="q" type="search" placeholder="topic, place, keyword" />
+          </label>
+          <label>
+            Source
+            <select id="source" name="source">
+              <option value="all">All sources</option>
+              <option value="primary">DH only</option>
+              <option value="competitor">Competitors</option>
+            </select>
+          </label>
+          <div class="date-grid">
+            <label>
+              From
+              <input id="from" name="from" type="date" />
+            </label>
+            <label>
+              To
+              <input id="to" name="to" type="date" />
+            </label>
+          </div>
+          <label id="pinWrap" class="hidden">
+            PIN
+            <input id="pin" type="password" inputmode="numeric" placeholder="Dashboard PIN" />
+          </label>
+        </form>
+
+        <div class="actions">
+          <button id="refreshBtn" type="button" title="Refresh RSS feeds">
+            <span aria-hidden="true">↻</span>
+            Refresh
+          </button>
+          <a id="exportLink" class="button ghost" href="#" title="Export CSV">
+            <span aria-hidden="true">⇩</span>
+            CSV
+          </a>
+        </div>
+
+        <div class="status">
+          <span id="aiMode">AI mode</span>
+          <p id="statusText">Loading dashboard…</p>
+        </div>
+      </aside>
+
+      <main>
+        <section class="topbar">
+          <div>
+            <p class="kicker">Deccan Herald</p>
+            <h2>Live editorial radar</h2>
+          </div>
+          <div class="clock">
+            <span id="articleCount">0</span>
+            <small>stories tracked</small>
+          </div>
+        </section>
+
+        <section class="metrics" aria-label="Dashboard metrics">
+          <div>
+            <strong id="dhCount">0</strong>
+            <span>DH stories</span>
+          </div>
+          <div>
+            <strong id="competitorCount">0</strong>
+            <span>Competitor stories</span>
+          </div>
+          <div>
+            <strong id="clusterCount">0</strong>
+            <span>Topic clusters</span>
+          </div>
+          <div>
+            <strong id="gapCount">0</strong>
+            <span>Coverage gaps</span>
+          </div>
+        </section>
+
+        <section class="layout-grid">
+          <div class="panel wide">
+            <div class="panel-head">
+              <h3>Trending Topics</h3>
+              <span id="updatedAt"></span>
+            </div>
+            <div id="trendingTopics" class="topic-list"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Top Keywords</h3>
+            </div>
+            <div id="keywords" class="keyword-cloud"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Missing Angles</h3>
+            </div>
+            <div id="missingAngles" class="insight-list"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Follow-ups</h3>
+            </div>
+            <div id="followUps" class="insight-list"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Explainers</h3>
+            </div>
+            <div id="explainers" class="insight-list"></div>
+          </div>
+
+          <div class="panel wide">
+            <div class="panel-head">
+              <h3>Competitor Coverage</h3>
+            </div>
+            <div id="coverage" class="coverage-list"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Dynamic Sources</h3>
+            </div>
+            <div id="dynamicSources" class="source-list"></div>
+          </div>
+
+          <div class="panel wide">
+            <div class="panel-head">
+              <h3>Latest Stories</h3>
+            </div>
+            <div id="stories" class="story-list"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
