@@ -107,6 +107,27 @@ const els = {
 let allArticles = SAMPLE_ARTICLES;
 let sourceHealth = [];
 let generatedAt = new Date().toISOString();
+let hasFetchedData = false;
+let filtersDirty = false;
+let isFetching = false;
+
+function updateFetchButton() {
+  const label = els.refreshBtn.querySelector(".btn-label");
+  const icon = els.refreshBtn.querySelector(".btn-icon");
+  const isRefresh = hasFetchedData && !filtersDirty;
+  if (isFetching) {
+    label.textContent = "Fetching…";
+    icon.textContent = "";
+    els.refreshBtn.classList.add("loading");
+  } else {
+    label.textContent = isRefresh ? "Refresh" : "Fetch";
+    icon.textContent = isRefresh ? "↻" : "⇣";
+    els.refreshBtn.classList.remove("loading");
+  }
+  els.refreshBtn.disabled = isFetching;
+  els.refreshBtn.setAttribute("aria-busy", String(isFetching));
+  els.refreshBtn.title = isRefresh ? "Fetch the latest RSS feeds" : "Fetch RSS feeds";
+}
 
 const formatDate = new Intl.DateTimeFormat("en-IN", {
   day: "2-digit",
@@ -211,8 +232,11 @@ async function fetchFeed(source) {
 }
 
 async function refreshFeeds() {
-  els.statusText.textContent = "Refreshing RSS feeds from the browser...";
-  els.refreshBtn.disabled = true;
+  if (isFetching) return;
+  isFetching = true;
+  els.statusText.textContent = "Fetching RSS feeds…";
+  els.statusText.classList.add("is-loading");
+  updateFetchButton();
   const articles = [];
   const health = [];
 
@@ -230,6 +254,7 @@ async function refreshFeeds() {
   if (articles.length) {
     allArticles = dedupeArticles(articles).sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
     generatedAt = new Date().toISOString();
+    hasFetchedData = true;
     localStorage.setItem("dh-static-cache", JSON.stringify({ articles: allArticles, sourceHealth, generatedAt }));
   } else {
     const cached = loadCachedArticles();
@@ -237,7 +262,10 @@ async function refreshFeeds() {
     sourceHealth = cached?.sourceHealth || health;
     generatedAt = cached?.generatedAt || new Date().toISOString();
   }
-  els.refreshBtn.disabled = false;
+  filtersDirty = false;
+  isFetching = false;
+  els.statusText.classList.remove("is-loading");
+  updateFetchButton();
   loadDashboard();
 }
 
@@ -464,12 +492,12 @@ function loadDashboard() {
   const loaded = sourceHealth.filter((item) => item.ok).length;
   const status = sourceHealth.length
     ? `Loaded ${allArticles.length} articles from ${loaded}/${SOURCES.length} feeds.`
-    : "Using starter sample data. Click Refresh to fetch live RSS.";
+    : "Using starter sample data. Click Fetch to load live RSS.";
   render({ articles, insights, status, refreshInProgress: false });
 }
 
 function render({ articles, insights, status, refreshInProgress }) {
-  els.statusText.textContent = refreshInProgress ? "Refreshing RSS feeds..." : status;
+  els.statusText.textContent = refreshInProgress ? "Fetching RSS feeds…" : status;
   els.aiMode.textContent = insights.aiMode;
   els.articleCount.textContent = insights.stats.totalArticles;
   els.dhCount.textContent = insights.stats.dhArticles;
@@ -648,7 +676,13 @@ function escapeAttr(value = "") {
   return escapeHtml(value).replace(/`/g, "&#96;");
 }
 
+function markFiltersDirty() {
+  filtersDirty = true;
+  updateFetchButton();
+}
+els.filters.addEventListener("input", markFiltersDirty);
 els.filters.addEventListener("input", debounce(loadDashboard));
+els.source.addEventListener("change", markFiltersDirty);
 els.source.addEventListener("change", loadDashboard);
 els.refreshBtn.addEventListener("click", refreshFeeds);
 els.exportLink.addEventListener("click", (event) => {
@@ -661,7 +695,8 @@ if (cached?.articles?.length) {
   allArticles = cached.articles;
   sourceHealth = cached.sourceHealth || [];
   generatedAt = cached.generatedAt || generatedAt;
+  hasFetchedData = true;
 }
 loadSources();
 loadDashboard();
-refreshFeeds();
+updateFetchButton();
