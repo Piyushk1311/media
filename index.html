@@ -8,91 +8,98 @@
   </head>
   <body>
     <div class="app-shell">
-      <aside class="sidebar">
-        <div class="brand">
-          <span class="brand-mark">DH</span>
-          <div>
-            <h1>Editorial Intelligence</h1>
-            <p>Newsroom desk</p>
-          </div>
-        </div>
-
-        <form id="filters" class="filters">
-          <label>
-            Search
-            <input id="search" name="q" type="search" placeholder="topic, place, keyword" />
-          </label>
-          <label>
-            Source
-            <select id="source" name="source">
-              <option value="all">All sources</option>
-              <option value="primary">DH only</option>
-              <option value="competitor">Competitors</option>
-            </select>
-          </label>
-          <div class="date-grid">
-            <label>
-              From
-              <input id="from" name="from" type="date" />
-            </label>
-            <label>
-              To
-              <input id="to" name="to" type="date" />
-            </label>
-          </div>
-          <label id="pinWrap" class="hidden">
-            PIN
-            <input id="pin" type="password" inputmode="numeric" placeholder="Dashboard PIN" />
-          </label>
-        </form>
-
-        <div class="actions">
-          <button id="refreshBtn" type="button" title="Fetch RSS feeds">
-            <span class="btn-icon" aria-hidden="true">⇣</span>
-            <span class="btn-label">Fetch</span>
-          </button>
-          <a id="exportLink" class="button ghost" href="#" title="Export CSV">
-            <span aria-hidden="true">⇩</span>
-            CSV
-          </a>
-        </div>
-
-        <div class="status">
-          <span id="aiMode">AI mode</span>
-          <p id="statusText">Click Fetch to load the latest stories.</p>
-        </div>
-      </aside>
-
       <main>
         <section class="topbar">
-          <div>
-            <p class="kicker">Deccan Herald</p>
-            <h2>Live editorial radar</h2>
+          <div class="brand">
+            <span class="brand-mark">DH</span>
+            <div>
+              <p class="kicker">Deccan Herald</p>
+              <h2>Live editorial radar</h2>
+              <p id="statusText" class="status-text">Click Fetch to load the latest stories.</p>
+            </div>
           </div>
-          <div class="clock">
-            <span id="articleCount">0</span>
-            <small>stories tracked</small>
+          <div class="top-actions">
+            <span id="aiMode" class="mode-chip">AI mode</span>
+            <div class="clock">
+              <span id="articleCount">0</span>
+              <small>stories tracked</small>
+            </div>
+            <div class="filter-wrap">
+              <button id="controlsToggle" class="icon-btn" type="button" aria-expanded="false" aria-controls="controls" aria-label="Filters and fetch" title="Filters &amp; fetch">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>
+              </button>
+              <div id="controls" class="controls hidden">
+                <form id="filters" class="filters">
+                  <label>
+                    Search
+                    <input id="search" name="q" type="search" placeholder="topic, place, keyword" />
+                  </label>
+                  <label>
+                    Source
+                    <select id="source" name="source">
+                      <option value="all">All sources</option>
+                      <option value="primary">DH only</option>
+                      <option value="competitor">Competitors</option>
+                    </select>
+                  </label>
+                  <div class="date-grid">
+                    <label>
+                      From
+                      <input id="from" name="from" type="date" />
+                    </label>
+                    <label>
+                      To
+                      <input id="to" name="to" type="date" />
+                    </label>
+                  </div>
+                  <label id="pinWrap" class="hidden">
+                    PIN
+                    <input id="pin" type="password" inputmode="numeric" placeholder="Dashboard PIN" />
+                  </label>
+                </form>
+                <div class="actions">
+                  <button id="refreshBtn" type="button" title="Fetch RSS feeds">
+                    <span class="btn-icon" aria-hidden="true">⇣</span>
+                    <span class="btn-label">Fetch</span>
+                  </button>
+                  <a id="exportLink" class="button ghost" href="#" title="Export CSV">
+                    <span aria-hidden="true">⇩</span>
+                    CSV
+                  </a>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
-        <section class="metrics" aria-label="Dashboard metrics">
-          <div>
-            <strong id="dhCount">0</strong>
-            <span>DH stories</span>
+        <div class="overview">
+          <section class="metrics" aria-label="Dashboard metrics">
+            <div>
+              <strong id="dhCount">0</strong>
+              <span>DH stories</span>
+            </div>
+            <div>
+              <strong id="competitorCount">0</strong>
+              <span>Competitor stories</span>
+            </div>
+            <div>
+              <strong id="clusterCount">0</strong>
+              <span>Topic clusters</span>
+            </div>
+            <div>
+              <strong id="gapCount">0</strong>
+              <span>Coverage gaps</span>
+            </div>
+          </section>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Top Keywords</h3>
           </div>
-          <div>
-            <strong id="competitorCount">0</strong>
-            <span>Competitor stories</span>
-          </div>
-          <div>
-            <strong id="clusterCount">0</strong>
-            <span>Topic clusters</span>
-          </div>
-          <div>
-            <strong id="gapCount">0</strong>
-            <span>Coverage gaps</span>
-          </div>
-        </section>
+          <p class="panel-desc">Most frequent words across current headlines, with their mention counts.</p>
+          <div id="keywords" class="keyword-cloud"></div>
+        </div>
+        </div>
 
         <section class="layout-grid">
           <div class="panel wide">
@@ -100,20 +107,31 @@
               <h3>Trending Topics</h3>
               <span id="updatedAt"></span>
             </div>
+            <p class="panel-desc">Stories grouped by topic, showing how many DH and competitor outlets cover each.</p>
             <div id="trendingTopics" class="topic-list"></div>
           </div>
 
-          <div class="panel">
+          <div class="panel coverage-panel">
             <div class="panel-head">
-              <h3>Top Keywords</h3>
+              <h3>Competitor Coverage</h3>
             </div>
-            <div id="keywords" class="keyword-cloud"></div>
+            <p class="panel-desc">Which outlets covered each top topic: gaps (competitors only), topics DH has covered, and DH exclusives. G#n marks the best Google News position.</p>
+            <div id="coverage" class="coverage-list"></div>
+          </div>
+
+          <div class="panel stories-panel">
+            <div class="panel-head">
+              <h3>Latest Stories</h3>
+            </div>
+            <p class="panel-desc">Newest headlines from all tracked feeds, with links to the originals.</p>
+            <div id="stories" class="story-list"></div>
           </div>
 
           <div class="panel">
             <div class="panel-head">
               <h3>Missing Angles</h3>
             </div>
+            <p class="panel-desc">Topics competitors are covering that DH has not yet reported on.</p>
             <div id="missingAngles" class="insight-list"></div>
           </div>
 
@@ -121,6 +139,7 @@
             <div class="panel-head">
               <h3>Follow-ups</h3>
             </div>
+            <p class="panel-desc">Suggested next-day follow-up stories for topics already in the news.</p>
             <div id="followUps" class="insight-list"></div>
           </div>
 
@@ -128,29 +147,18 @@
             <div class="panel-head">
               <h3>Explainers</h3>
             </div>
+            <p class="panel-desc">Topics that could use a background piece explaining what changed and who is affected.</p>
             <div id="explainers" class="insight-list"></div>
-          </div>
-
-          <div class="panel wide">
-            <div class="panel-head">
-              <h3>Competitor Coverage</h3>
-            </div>
-            <div id="coverage" class="coverage-list"></div>
           </div>
 
           <div class="panel">
             <div class="panel-head">
               <h3>Dynamic Sources</h3>
             </div>
+            <p class="panel-desc">Extra places to check for more reporting on the trending keywords.</p>
             <div id="dynamicSources" class="source-list"></div>
           </div>
 
-          <div class="panel wide">
-            <div class="panel-head">
-              <h3>Latest Stories</h3>
-            </div>
-            <div id="stories" class="story-list"></div>
-          </div>
         </section>
       </main>
     </div>

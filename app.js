@@ -85,6 +85,8 @@ const els = {
   to: document.querySelector("#to"),
   pinWrap: document.querySelector("#pinWrap"),
   refreshBtn: document.querySelector("#refreshBtn"),
+  controls: document.querySelector("#controls"),
+  controlsToggle: document.querySelector("#controlsToggle"),
   exportLink: document.querySelector("#exportLink"),
   statusText: document.querySelector("#statusText"),
   aiMode: document.querySelector("#aiMode"),
@@ -165,6 +167,13 @@ function extractImage(block) {
   return decodeEntities((media && media[1]) || (enclosure && enclosure[1]) || "");
 }
 
+function extractTags(block, limit = 4) {
+  const tags = [...block.matchAll(/<category[^>]*>([\s\S]*?)<\/category>/gi)]
+    .map((m) => stripHtml(m[1]))
+    .filter((tag) => tag && tag.length < 40);
+  return [...new Set(tags)].slice(0, limit);
+}
+
 function extractKeywords(text, limit = 12) {
   const counts = new Map();
   const words = text
@@ -181,6 +190,12 @@ function extractKeywords(text, limit = 12) {
     .map(([word]) => word);
 }
 
+function hashString(value) {
+  let hash = 5381;
+  for (let i = 0; i < value.length; i += 1) hash = ((hash << 5) + hash + value.charCodeAt(i)) >>> 0;
+  return hash.toString(36);
+}
+
 function parseFeed(xml, source) {
   const itemBlocks = [...xml.matchAll(/<item\b[\s\S]*?<\/item>/gi)].map((m) => m[0]);
   const entryBlocks = itemBlocks.length ? itemBlocks : [...xml.matchAll(/<entry\b[\s\S]*?<\/entry>/gi)].map((m) => m[0]);
@@ -192,10 +207,14 @@ function parseFeed(xml, source) {
     const link = decodeEntities(tagValue(block, "link") || (linkMatch && linkMatch[1]) || source.rss);
     const rawDate = tagValue(block, "pubDate") || tagValue(block, "published") || tagValue(block, "updated");
     const publishedAt = Number.isNaN(Date.parse(rawDate)) ? new Date().toISOString() : new Date(rawDate).toISOString();
+    const bodyRaw = tagValue(block, "content:encoded") || tagValue(block, "description") || tagValue(block, "summary") || tagValue(block, "content");
+    const body = stripHtml(bodyRaw).slice(0, 4000);
+    const inlineImage = (bodyRaw.match(/<img[^>]+src=["']([^"']+)["']/i) || [])[1] || "";
+    const tags = extractTags(block);
     const keywords = extractKeywords(`${title} ${summary}`, 8);
 
     return {
-      id: `${source.id}-${btoa(unescape(encodeURIComponent(link || title || String(index)))).replace(/[^a-z0-9]/gi, "").slice(0, 18)}`,
+      id: `${source.id}-${hashString(link || title || String(index))}`,
       sourceId: source.id,
       sourceName: source.name,
       sourceType: source.type,
@@ -203,14 +222,22 @@ function parseFeed(xml, source) {
       summary,
       link,
       publishedAt,
-      image: extractImage(block),
+      image: extractImage(block) || inlineImage,
+      body,
+      tags,
       keywords
     };
   });
 }
 
+// server.py exposes /proxy when running locally; on static hosting it 404s and we fall back.
+function localProxyUrl(target) {
+  return `./proxy?url=${encodeURIComponent(target)}`;
+}
+
 async function fetchFeed(source) {
   const urls = [
+    localProxyUrl(source.rss),
     source.rss,
     `https://api.allorigins.win/raw?url=${encodeURIComponent(source.rss)}`,
     `https://corsproxy.io/?${encodeURIComponent(source.rss)}`
@@ -229,6 +256,116 @@ async function fetchFeed(source) {
     }
   }
   throw new Error(lastError);
+}
+
+const GN_BASE = "https://news.google.com/rss";
+const GN_LOCALE = "hl=en-IN&gl=IN&ceid=IN:en";
+let gnSummary = null;
+
+async function fetchViaProxy(target) {
+  const urls = [
+    localProxyUrl(target),
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
+    `https://corsproxy.io/?${encodeURIComponent(target)}`
+  ];
+  let lastError = "Google News unavailable";
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const xml = await response.text();
+      if (!xml.includes("<item")) throw new Error("No items");
+      return xml;
+    } catch (error) {
+      lastError = error.message;
+    }
+  }
+  throw new Error(lastError);
+}
+
+function parseGoogleNews(xml) {
+  return [...xml.matchAll(/<item\b[\s\S]*?<\/item>/gi)].map((m, index) => {
+    const block = m[0];
+    const rawTitle = stripHtml(tagValue(block, "title"));
+    const publisher = stripHtml(tagValue(block, "source"));
+    const cut = rawTitle.lastIndexOf(" - ");
+    const title = cut > 0 ? rawTitle.slice(0, cut) : rawTitle;
+    return { rank: index + 1, title, publisher: publisher || (cut > 0 ? rawTitle.slice(cut + 3) : "") };
+  });
+}
+
+function normPublisher(name = "") {
+  return name.toLowerCase().replace(/\.com|\.in|\bthe\b/g, "").replace(/[^a-z]/g, "");
+}
+
+function titleWords(title) {
+  return new Set(
+    title.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !STOP_WORDS.has(w))
+  );
+}
+
+function titlesMatch(a, b) {
+  const wa = titleWords(a);
+  const wb = titleWords(b);
+  if (!wa.size || !wb.size) return false;
+  let shared = 0;
+  for (const w of wa) if (wb.has(w)) shared += 1;
+  return shared / Math.min(wa.size, wb.size) >= 0.6;
+}
+
+async function enrichWithGoogleNews(articles) {
+  for (const article of articles) {
+    delete article.gnRank;
+    delete article.gnQuery;
+  }
+  const topClusters = clusterArticles(articles).slice(0, 12);
+  const jobs = [
+    { label: "Top stories (India)", url: `${GN_BASE}?${GN_LOCALE}` },
+    { label: "Karnataka & Bengaluru", url: `${GN_BASE}/search?q=${encodeURIComponent("Karnataka OR Bengaluru when:1d")}&${GN_LOCALE}` },
+    ...topClusters.map((cluster) => ({
+      label: cluster.topic,
+      url: `${GN_BASE}/search?q=${encodeURIComponent(`${cluster.keywords.slice(0, 3).join(" ")} when:2d`)}&${GN_LOCALE}`
+    }))
+  ];
+
+  let okJobs = 0;
+  let next = 0;
+  const worker = async () => {
+    while (next < jobs.length) {
+      const job = jobs[next++];
+      try {
+        const items = parseGoogleNews(await fetchViaProxy(job.url));
+        okJobs += 1;
+        for (const article of articles) {
+          const outlet = normPublisher(article.sourceName);
+          for (const item of items) {
+            if (article.gnRank && article.gnRank <= item.rank) break;
+            const pub = normPublisher(item.publisher);
+            const samePublisher = pub && outlet && (pub.includes(outlet) || outlet.includes(pub));
+            if (samePublisher && titlesMatch(article.title, item.title)) {
+              article.gnRank = item.rank;
+              article.gnQuery = job.label;
+              break;
+            }
+          }
+        }
+      } catch {
+        /* a failed lookup just leaves those stories unranked */
+      }
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+
+  const ranked = (type) => articles.filter((a) => a.sourceType === type && a.gnRank);
+  const total = (type) => articles.filter((a) => a.sourceType === type).length;
+  return {
+    okJobs,
+    jobs: jobs.length,
+    dhRanked: ranked("primary").length,
+    dhTotal: total("primary"),
+    compRanked: ranked("competitor").length,
+    compTotal: total("competitor")
+  };
 }
 
 async function refreshFeeds() {
@@ -255,7 +392,13 @@ async function refreshFeeds() {
     allArticles = dedupeArticles(articles).sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
     generatedAt = new Date().toISOString();
     hasFetchedData = true;
-    localStorage.setItem("dh-static-cache", JSON.stringify({ articles: allArticles, sourceHealth, generatedAt }));
+    els.statusText.textContent = "Checking Google News rankings…";
+    try {
+      gnSummary = await enrichWithGoogleNews(allArticles);
+    } catch {
+      gnSummary = null;
+    }
+    localStorage.setItem("dh-static-cache", JSON.stringify({ articles: allArticles, sourceHealth, generatedAt, gnSummary }));
   } else {
     const cached = loadCachedArticles();
     allArticles = cached?.articles || SAMPLE_ARTICLES;
@@ -491,12 +634,14 @@ function loadDashboard() {
   const insights = buildInsights(articles);
   const loaded = sourceHealth.filter((item) => item.ok).length;
   const status = sourceHealth.length
-    ? `Loaded ${allArticles.length} articles from ${loaded}/${SOURCES.length} feeds.`
+    ? `Loaded ${allArticles.length} articles from ${loaded}/${SOURCES.length} feeds.${gnSummary ? (gnSummary.okJobs ? ` Google News: ${gnSummary.dhRanked + gnSummary.compRanked} stories ranked.` : " Google News ranks unavailable.") : ""}`
     : "Using starter sample data. Click Fetch to load live RSS.";
   render({ articles, insights, status, refreshInProgress: false });
 }
 
 function render({ articles, insights, status, refreshInProgress }) {
+  hoverLists = [];
+  hideHoverCard();
   els.statusText.textContent = refreshInProgress ? "Fetching RSS feeds…" : status;
   els.aiMode.textContent = insights.aiMode;
   els.articleCount.textContent = insights.stats.totalArticles;
@@ -507,7 +652,7 @@ function render({ articles, insights, status, refreshInProgress }) {
   els.updatedAt.textContent = `Updated ${formatDate.format(new Date(insights.stats.lastUpdated))}`;
 
   renderTopics(insights.clusters);
-  renderKeywords(insights.topKeywords);
+  renderKeywords(insights.topKeywords, articles);
   renderInsights(els.missingAngles, insights.missingAngles, "reason");
   renderInsights(els.followUps, insights.followUps);
   renderInsights(els.explainers, insights.explainers);
@@ -522,16 +667,17 @@ function renderTopics(clusters) {
   for (const cluster of clusters.slice(0, 9)) {
     const node = document.createElement("article");
     node.className = "topic";
-    const sourceText = cluster.sources.slice(0, 4).join(", ");
+    const idsFor = (filter) => listRef(cluster.articles.filter(filter));
+    const sourceChips = cluster.sources.slice(0, 6).map((name) => `<span class="platform hover-trigger" tabindex="0" role="button" data-title="${escapeAttr(name)} · ${escapeAttr(cluster.topic)}" data-list="${escapeAttr(idsFor((a) => a.sourceName === name))}">${escapeHtml(name)}</span>`).join("");
     node.innerHTML = `
       <div class="topic-top">
         <h4>${escapeHtml(cluster.topic)}</h4>
         <span class="badge ${cluster.competitorCount > cluster.dhCount ? "red" : "teal"}">${cluster.articles.length} stories</span>
       </div>
-      <p>${escapeHtml(sourceText)}</p>
+      <div class="platform-row">${sourceChips}</div>
       <div class="badge-row">
-        <span class="badge teal">DH ${cluster.dhCount}</span>
-        <span class="badge gold">Competitors ${cluster.competitorCount}</span>
+        <span class="badge teal hover-trigger" tabindex="0" role="button" data-title="DH stories · ${escapeAttr(cluster.topic)}" data-list="${escapeAttr(idsFor((a) => a.sourceType === "primary"))}">DH ${cluster.dhCount}</span>
+        <span class="badge gold hover-trigger" tabindex="0" role="button" data-title="Competitor stories · ${escapeAttr(cluster.topic)}" data-list="${escapeAttr(idsFor((a) => a.sourceType === "competitor"))}">Competitors ${cluster.competitorCount}</span>
         ${cluster.keywords.slice(0, 5).map((keyword) => `<span class="badge">${escapeHtml(keyword)}</span>`).join("")}
       </div>
     `;
@@ -539,12 +685,16 @@ function renderTopics(clusters) {
   }
 }
 
-function renderKeywords(keywords) {
+function renderKeywords(keywords, articles = []) {
   els.keywords.innerHTML = "";
   if (!keywords.length) return empty(els.keywords, "No keywords found.");
   for (const item of keywords) {
     const node = document.createElement("span");
-    node.className = "keyword";
+    node.className = "keyword hover-trigger";
+    node.tabIndex = 0;
+    node.setAttribute("role", "button");
+    node.dataset.title = `Stories mentioning "${item.keyword}"`;
+    node.dataset.list = listRef(articles.filter((a) => a.keywords.includes(item.keyword)));
     node.textContent = `${item.keyword} ${item.count}`;
     els.keywords.appendChild(node);
   }
@@ -576,25 +726,113 @@ function renderInsights(container, items, metaKey) {
   }
 }
 
+let coverageFilter = "all";
+let coverageScope = "trending";
+const TRENDING_COUNT = 9; // same cut-off as the Trending Topics block
+let lastCoverageClusters = [];
+
 function renderCoverage(clusters) {
+  lastCoverageClusters = clusters;
   els.coverage.innerHTML = "";
-  const rows = clusters.filter((cluster) => cluster.competitorCount || cluster.dhCount).slice(0, 10);
-  if (!rows.length) return empty(els.coverage, "No coverage to compare.");
-  const max = Math.max(...rows.map((cluster) => cluster.competitorCount + cluster.dhCount), 1);
-  for (const cluster of rows) {
-    const total = cluster.competitorCount + cluster.dhCount;
-    const node = document.createElement("article");
-    node.className = "coverage-item";
-    node.innerHTML = `
-      <div>
-        <h4>${escapeHtml(cluster.topic)}</h4>
-        <p>DH ${cluster.dhCount} · Competitors ${cluster.competitorCount}</p>
-        <div class="bar"><span style="width:${Math.max(8, (total / max) * 100)}%"></span></div>
+  if (!clusters.length) return empty(els.coverage, "No coverage to compare.");
+
+  const countFor = (cluster, sourceId) => cluster.articles.filter((article) => article.sourceId === sourceId).length;
+  const outletTotals = SOURCES.map((source) => ({
+    ...source,
+    total: clusters.reduce((sum, cluster) => sum + countFor(cluster, source.id), 0)
+  })).filter((source) => source.total > 0);
+  const competitorIds = outletTotals.filter((source) => source.type === "competitor").map((source) => source.id);
+
+  const allRows = clusters.map((cluster, index) => {
+    const outletsCovering = competitorIds.filter((id) => countFor(cluster, id) > 0).length;
+    const status = cluster.dhCount === 0 && outletsCovering > 0 ? "gap" : cluster.dhCount > 0 && outletsCovering === 0 ? "exclusive" : "covered";
+    return { cluster, outletsCovering, status, trending: index < TRENDING_COUNT };
+  });
+  const scopeCounts = {
+    all: allRows.length,
+    trending: allRows.filter((r) => r.trending).length,
+    other: allRows.filter((r) => !r.trending).length
+  };
+  const rows = allRows.filter((r) => coverageScope === "all" || (coverageScope === "trending" ? r.trending : !r.trending));
+
+  const competitorTopics = rows.filter((row) => row.outletsCovering > 0);
+  const dhAlso = competitorTopics.filter((row) => row.cluster.dhCount > 0).length;
+  const gaps = competitorTopics.length - dhAlso;
+  const parity = competitorTopics.length ? Math.round((dhAlso / competitorTopics.length) * 100) : 0;
+  const maxTotal = Math.max(...outletTotals.map((source) => source.total), 1);
+
+  const counts = {
+    all: rows.length,
+    gap: rows.filter((r) => r.status === "gap").length,
+    covered: rows.filter((r) => r.status === "covered").length,
+    exclusive: rows.filter((r) => r.status === "exclusive").length
+  };
+  if (!counts[coverageFilter]) coverageFilter = "all";
+  const top = rows
+    .filter((r) => coverageFilter === "all" || r.status === coverageFilter)
+    .sort((a, b) => b.cluster.articles.length - a.cluster.articles.length || b.outletsCovering - a.outletsCovering)
+    .slice(0, 12);
+
+  const statusLabel = { gap: "Gap", covered: "Covered", exclusive: "DH exclusive" };
+  const statusClass = { gap: "red", covered: "teal", exclusive: "gold" };
+
+  const summary = `
+    <div class="cov-summary">
+      <div class="cov-score">
+        <strong>${parity}%</strong>
+        <span>of topics competitors cover, DH also covers (${dhAlso} of ${competitorTopics.length})</span>
+        <span class="badge ${gaps ? "red" : "teal"}">${gaps} ${gaps === 1 ? "gap" : "gaps"} to close</span>
+        ${gnSummary && gnSummary.okJobs ? `<span class="gn-line">On Google News: DH ${gnSummary.dhRanked}/${gnSummary.dhTotal} stories ranked, competitors ${gnSummary.compRanked}/${gnSummary.compTotal}</span>` : `<span class="gn-line">Google News ranks not loaded</span>`}
       </div>
-      <span class="badge ${cluster.competitorCount > cluster.dhCount ? "red" : "teal"}">${cluster.competitorCount > cluster.dhCount ? "Gap" : "Covered"}</span>
-    `;
-    els.coverage.appendChild(node);
-  }
+      <div class="cov-outlets">
+        ${outletTotals.map((source) => `
+          <div class="cov-outlet ${source.type === "primary" ? "is-dh" : ""}">
+            <span class="cov-name">${escapeHtml(source.name)}</span>
+            <div class="bar"><span style="width:${Math.max(6, (source.total / maxTotal) * 100)}%"></span></div>
+            <span class="cov-num">${source.total}</span>
+          </div>`).join("")}
+      </div>
+    </div>`;
+
+  const head = outletTotals.map((source) => `<th class="${source.type === "primary" ? "is-dh" : ""}">${escapeHtml(source.name)}</th>`).join("");
+  const body = top.map(({ cluster, status, trending }) => {
+    const cells = outletTotals.map((source) => {
+      const n = countFor(cluster, source.id);
+      const ranks = cluster.articles.filter((a) => a.sourceId === source.id && a.gnRank).map((a) => a.gnRank);
+      const best = ranks.length ? Math.min(...ranks) : null;
+      return `<td class="${source.type === "primary" ? "is-dh" : ""}">${n ? `<span class="cell on hover-trigger" tabindex="0" role="button" data-title="${escapeAttr(source.name)} · ${escapeAttr(cluster.topic)}" data-list="${listRef(cluster.articles.filter((a) => a.sourceId === source.id))}">${n}</span>` : `<span class="cell off">–</span>`}${best ? `<span class="gn-rank" title="Best Google News position">G#${best}</span>` : ""}</td>`;
+    }).join("");
+    return `
+      <tr class="row-${status}">
+        <th scope="row">
+          <span class="cov-topic">${escapeHtml(cluster.topic)}${trending ? ' <span class="trend-tag" title="Shown in Trending Topics">Trending</span>' : ""}</span>
+        </th>
+        ${cells}
+        <td><span class="badge ${statusClass[status]} hover-trigger" tabindex="0" role="button" data-title="${statusLabel[status]} · ${escapeAttr(cluster.topic)}" data-list="${listRef(cluster.articles)}">${statusLabel[status]}</span></td>
+      </tr>`;
+  }).join("");
+
+  const scopeLabels = [["all", "All topics"], ["trending", "Top trending only"], ["other", "Without top trending"]];
+  const scopeSelect = `
+    <select id="covScope" class="cov-select" aria-label="Topic scope">
+      ${scopeLabels.map(([key, label]) => `<option value="${key}" ${coverageScope === key ? "selected" : ""}>${label} (${scopeCounts[key]})</option>`).join("")}
+    </select>`;
+  const filterLabels = [["all", "All"], ["gap", "Gaps"], ["covered", "DH covered"], ["exclusive", "DH exclusive"]];
+  const filters = `
+    <div class="cov-filters" role="group" aria-label="Topic filters">
+      ${scopeSelect}
+      ${filterLabels.map(([key, label]) => `<button type="button" class="cov-filter ${coverageFilter === key ? "active" : ""}" data-filter="${key}" aria-pressed="${coverageFilter === key}">${label} <span>${counts[key]}</span></button>`).join("")}
+    </div>`;
+
+  els.coverage.innerHTML = `
+    ${summary}
+    ${filters}
+    <div class="cov-table-wrap">
+      <table class="cov-table">
+        <thead><tr><th scope="col">Topic</th>${head}<th scope="col">Status</th></tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>`;
 }
 
 function renderSources(items) {
@@ -616,24 +854,130 @@ function renderStories(articles) {
   for (const article of articles.slice(0, 18)) {
     const node = document.createElement("article");
     node.className = "story";
-    const image = article.image ? `style="background-image:url('${escapeAttr(article.image)}')"` : "";
+    const text = article.body || article.summary || "No summary available.";
+    const tags = (article.tags || []).slice(0, 3);
+    const keywords = (article.keywords || []).slice(0, 3);
+    const hero = article.image
+      ? `<img src="${escapeAttr(article.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()" />`
+      : "";
     node.innerHTML = `
-      <div class="thumb" ${image}></div>
-      <div>
-        <div class="story-top">
-          <h4><a href="${escapeAttr(article.link)}" target="_blank" rel="noreferrer">${escapeHtml(article.title)}</a></h4>
+      <div class="hero">${hero}</div>
+      <div class="story-body">
+        <div class="story-meta">
           <span class="badge ${article.sourceType === "primary" ? "teal" : "gold"}">${escapeHtml(article.sourceName)}</span>
+          ${article.gnRank ? `<span class="badge gn" title="Position in Google News results (${escapeAttr(article.gnQuery || "")})">Google News #${article.gnRank}</span>` : ""}
+          <time datetime="${escapeAttr(article.publishedAt)}">${formatDate.format(new Date(article.publishedAt))}</time>
         </div>
-        <p>${escapeHtml(article.summary || "No summary available.")}</p>
+        <h4>${escapeHtml(article.title)}</h4>
+        <p class="story-text">${escapeHtml(text)}</p>
         <div class="badge-row">
-          <span class="badge">${formatDate.format(new Date(article.publishedAt))}</span>
-          ${article.keywords.slice(0, 4).map((keyword) => `<span class="badge">${escapeHtml(keyword)}</span>`).join("")}
+          ${tags.map((tag) => `<span class="badge tag">#${escapeHtml(tag)}</span>`).join("")}
+          ${keywords.map((keyword) => `<span class="badge">${escapeHtml(keyword)}</span>`).join("")}
+        </div>
+        <div class="story-actions">
+          ${text.length > 140 ? '<button type="button" class="read-more" aria-expanded="false">Read more</button>' : ""}
+          <a class="open-link" href="${escapeAttr(article.link)}" target="_blank" rel="noreferrer">Open in browser ↗</a>
         </div>
       </div>
     `;
     els.stories.appendChild(node);
   }
 }
+
+const hoverCard = document.createElement("div");
+hoverCard.className = "hover-card hidden";
+hoverCard.setAttribute("role", "dialog");
+document.body.appendChild(hoverCard);
+let hoverLists = [];
+function listRef(list) {
+  hoverLists.push(list);
+  return hoverLists.length - 1;
+}
+let hoverTimer = null;
+let hoverTrigger = null;
+
+function hideHoverCard() {
+  hoverCard.classList.add("hidden");
+  hoverTrigger = null;
+}
+
+function showHoverCard(trigger) {
+  clearTimeout(hoverTimer);
+  if (hoverTrigger === trigger && !hoverCard.classList.contains("hidden")) return;
+  const stories = (hoverLists[Number(trigger.dataset.list)] || [])
+    .slice()
+    .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+  hoverCard.innerHTML = `
+    <div class="hover-card-head">${escapeHtml(trigger.dataset.title || "Stories")} <span>${stories.length}</span></div>
+    <ul>
+      ${stories.length
+        ? stories.map((a) => `
+          <li>
+            <span class="badge ${a.sourceType === "primary" ? "teal" : "gold"}">${escapeHtml(a.sourceName)}</span>
+            <a href="${escapeAttr(a.link)}" target="_blank" rel="noreferrer">${escapeHtml(a.title)}</a>
+          </li>`).join("")
+        : '<li class="hover-empty">No stories found.</li>'}
+    </ul>`;
+  hoverCard.classList.remove("hidden");
+  hoverTrigger = trigger;
+  const rect = trigger.getBoundingClientRect();
+  const width = Math.min(380, window.innerWidth - 16);
+  hoverCard.style.width = `${width}px`;
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+  const below = window.innerHeight - rect.bottom;
+  const height = Math.min(hoverCard.offsetHeight, 340);
+  const top = below >= height + 12 || rect.top < height + 12 ? rect.bottom + 6 : rect.top - height - 6;
+  hoverCard.style.left = `${left}px`;
+  hoverCard.style.top = `${Math.max(8, top)}px`;
+}
+
+function scheduleHide() {
+  clearTimeout(hoverTimer);
+  hoverTimer = setTimeout(hideHoverCard, 200);
+}
+
+document.addEventListener("mouseover", (event) => {
+  const trigger = event.target.closest(".hover-trigger");
+  if (trigger) return showHoverCard(trigger);
+  if (event.target.closest(".hover-card")) clearTimeout(hoverTimer);
+});
+document.addEventListener("mouseout", (event) => {
+  if (event.target.closest(".hover-trigger, .hover-card")) scheduleHide();
+});
+document.addEventListener("focusin", (event) => {
+  const trigger = event.target.closest(".hover-trigger");
+  if (trigger) showHoverCard(trigger);
+});
+document.addEventListener("click", (event) => {
+  const trigger = event.target.closest(".hover-trigger");
+  if (trigger) return showHoverCard(trigger);
+  if (!event.target.closest(".hover-card")) hideHoverCard();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") hideHoverCard();
+});
+window.addEventListener("scroll", hideHoverCard, { passive: true });
+
+els.coverage.addEventListener("change", (event) => {
+  if (!event.target.matches("#covScope")) return;
+  coverageScope = event.target.value;
+  renderCoverage(lastCoverageClusters);
+});
+
+els.coverage.addEventListener("click", (event) => {
+  const button = event.target.closest(".cov-filter");
+  if (!button) return;
+  coverageFilter = button.dataset.filter;
+  renderCoverage(lastCoverageClusters);
+});
+
+els.stories.addEventListener("click", (event) => {
+  const button = event.target.closest(".read-more");
+  if (!button) return;
+  const expanded = button.closest(".story").classList.toggle("expanded");
+  button.textContent = expanded ? "Show less" : "Read more";
+  button.setAttribute("aria-expanded", String(expanded));
+});
 
 function exportCsv() {
   const articles = getFilteredArticles();
@@ -676,6 +1020,12 @@ function escapeAttr(value = "") {
   return escapeHtml(value).replace(/`/g, "&#96;");
 }
 
+els.controlsToggle.addEventListener("click", () => {
+  const open = els.controls.classList.toggle("hidden") === false;
+  els.controlsToggle.setAttribute("aria-expanded", String(open));
+  els.controlsToggle.classList.toggle("open", open);
+});
+
 function markFiltersDirty() {
   filtersDirty = true;
   updateFetchButton();
@@ -695,6 +1045,7 @@ if (cached?.articles?.length) {
   allArticles = cached.articles;
   sourceHealth = cached.sourceHealth || [];
   generatedAt = cached.generatedAt || generatedAt;
+  gnSummary = cached.gnSummary || null;
   hasFetchedData = true;
 }
 loadSources();
