@@ -103,7 +103,13 @@ const els = {
   explainers: document.querySelector("#explainers"),
   coverage: document.querySelector("#coverage"),
   dynamicSources: document.querySelector("#dynamicSources"),
-  stories: document.querySelector("#stories")
+  stories: document.querySelector("#stories"),
+  feedChecked: document.querySelector("#feedChecked"),
+  feedWarnings: document.querySelector("#feedWarnings"),
+  feedList: document.querySelector("#feedList"),
+  guideWindow: document.querySelector("#guideWindow"),
+  guidePrimary: document.querySelector("#guidePrimary"),
+  guideCompetitors: document.querySelector("#guideCompetitors")
 };
 
 let allArticles = SAMPLE_ARTICLES;
@@ -243,7 +249,7 @@ async function fetchFeed(source) {
     `https://corsproxy.io/?${encodeURIComponent(source.rss)}`
   ];
 
-  let lastError = "Feed unavailable";
+  const errors = [];
   for (const url of urls) {
     try {
       const response = await fetch(url, { cache: "no-store" });
@@ -252,10 +258,17 @@ async function fetchFeed(source) {
       if (!xml.includes("<item") && !xml.includes("<entry")) throw new Error("No RSS items found");
       return parseFeed(xml, source);
     } catch (error) {
-      lastError = error.message;
+      errors.push(error.message);
     }
   }
-  throw new Error(lastError);
+  // Report the most telling failure (a block or rate limit beats a generic network error).
+  const best =
+    errors.find((e) => /HTTP (401|403|429|451)/.test(e)) ||
+    errors.find((e) => /HTTP 5\d\d/.test(e)) ||
+    errors.find((e) => /No RSS items/.test(e)) ||
+    errors[errors.length - 1] ||
+    "Feed unavailable";
+  throw new Error(best);
 }
 
 const GN_BASE = "https://news.google.com/rss";
@@ -657,6 +670,9 @@ function render({ articles, insights, status, refreshInProgress }) {
   renderInsights(els.followUps, insights.followUps);
   renderInsights(els.explainers, insights.explainers);
   renderCoverage(insights.clusters);
+  renderFeedHealth();
+  renderGuideWindow(articles);
+  renderGuideOutlets();
   renderSources(insights.dynamicSources);
   renderStories(articles);
 }
@@ -833,6 +849,72 @@ function renderCoverage(clusters) {
         <tbody>${body}</tbody>
       </table>
     </div>`;
+}
+
+function describeFeedError(message = "") {
+  if (/HTTP (401|403|451)/.test(message)) return "Blocked by the website (access denied). Its stories are missing from every count.";
+  if (/HTTP 429/.test(message)) return "Too many requests: the website is limiting us. Try again in a few minutes.";
+  if (/HTTP 5\d\d/.test(message)) return "The website had an error. Try again later.";
+  if (/HTTP 404/.test(message)) return "The feed address was not found. It may have moved.";
+  if (/No RSS items/.test(message)) return "The feed answered but contained no stories.";
+  return "Could not reach the feed (network problem or blocked by the browser).";
+}
+
+function renderFeedHealth() {
+  const warnings = [];
+  const rows = SOURCES.map((source) => {
+    const health = sourceHealth.find((item) => item.sourceId === source.id);
+    const mine = allArticles.filter((a) => a.sourceId === source.id && !String(a.id).startsWith("sample-"));
+    let state = "idle";
+    let text = "Not checked yet. Click Fetch.";
+    if (health && health.ok) {
+      state = "ok";
+      const times = mine.map((a) => Date.parse(a.publishedAt)).filter(Number.isFinite);
+      const range = times.length
+        ? ` · covers ${formatDate.format(new Date(Math.min(...times)))} to ${formatDate.format(new Date(Math.max(...times)))}`
+        : "";
+      text = `Working · ${health.count} stories${range}`;
+    } else if (health) {
+      state = "bad";
+      text = describeFeedError(health.error);
+      warnings.push({ level: "bad", name: source.name, text });
+    }
+    return `<li class="feed-row ${state}"><span class="feed-dot" aria-hidden="true"></span><strong>${escapeHtml(source.name)}</strong><span>${escapeHtml(text)}</span></li>`;
+  });
+
+  if (gnSummary) {
+    if (!gnSummary.okJobs) warnings.push({ level: "bad", name: "Google News", text: "Rankings could not be loaded, so no Google News positions are shown." });
+    else if (gnSummary.okJobs < gnSummary.jobs) warnings.push({ level: "warn", name: "Google News", text: `${gnSummary.okJobs} of ${gnSummary.jobs} lookups worked, so some Google News positions may be missing.` });
+  }
+
+  const checked = sourceHealth.length;
+  const checkedAt = checked ? `Last checked ${formatDate.format(new Date(generatedAt))}` : "";
+  const banner = !checked
+    ? '<div class="feed-banner idle">Feeds have not been checked yet. Click Fetch in the filter menu (top right) to load them.</div>'
+    : warnings.length
+      ? `<div class="feed-banner ${warnings.some((w) => w.level === "bad") ? "bad" : "warn"}" role="alert"><strong>${warnings.length} ${warnings.length === 1 ? "problem" : "problems"} found</strong><ul>${warnings.map((w) => `<li class="${w.level}"><strong>${escapeHtml(w.name)}:</strong> ${escapeHtml(w.text)}</li>`).join("")}</ul></div>`
+      : '<div class="feed-banner ok">All feeds are working.</div>';
+
+  els.feedChecked.textContent = checkedAt;
+  els.feedWarnings.innerHTML = banner;
+  els.feedList.innerHTML = rows.join("");
+}
+
+function renderGuideOutlets() {
+  els.guidePrimary.textContent = SOURCES.filter((s) => s.type === "primary").map((s) => s.name).join(", ");
+  els.guideCompetitors.textContent = SOURCES.filter((s) => s.type === "competitor").map((s) => s.name).join(", ");
+}
+
+function renderGuideWindow(articles) {
+  const times = articles.map((a) => Date.parse(a.publishedAt)).filter(Number.isFinite);
+  if (!times.length) {
+    els.guideWindow.textContent = "No stories are loaded right now.";
+    return;
+  }
+  const from = Math.min(...times);
+  const to = Math.max(...times);
+  const hours = Math.max(1, Math.round((to - from) / 36e5));
+  els.guideWindow.textContent = `Right now they use ${articles.length} stories published from ${formatDate.format(new Date(from))} to ${formatDate.format(new Date(to))} (about ${hours} hour${hours === 1 ? "" : "s"}).`;
 }
 
 function renderSources(items) {

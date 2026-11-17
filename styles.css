@@ -765,3 +765,29 @@ body { background: var(--paper); }
 .cov-filters { flex-wrap: nowrap; align-items: center; overflow-x: auto; padding-bottom: 2px; }
 .cov-filters .cov-filter { flex: none; white-space: nowrap; }
 .cov-filters .cov-select { flex: none; }
+
+/* Feed status + guide */
+.feed-panel, .guide-panel { margin-top: 16px; }
+.feed-banner { padding: 10px 14px; border-radius: 8px; font-size: 13px; line-height: 1.45; margin-bottom: 10px; border: 1px solid; }
+.feed-banner ul { margin: 6px 0 0; padding-left: 18px; }
+.feed-banner li.warn { color: #7a4a00; }
+.feed-banner.bad { color: #8b1a1a; background: #fdeeee; border-color: #f2c4c4; }
+.feed-banner.ok { color: #0b5f2a; background: #eaf7ee; border-color: #bfe3c9; }
+.feed-banner.idle { color: #4f5b69; background: #f5f7f9; border-color: var(--line); }
+.feed-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.feed-row { display: grid; grid-template-columns: 14px 150px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 12px; border: 1px solid #e4eaf0; border-radius: 8px; background: #fff; font-size: 13px; }
+.feed-row span:last-child { color: #4f5b69; }
+.feed-dot { width: 10px; height: 10px; border-radius: 50%; background: #a8b2bd; }
+.feed-row.ok .feed-dot { background: #1f9d55; }
+.feed-row.bad .feed-dot { background: #d12a2a; }
+.feed-row.bad span:last-child { color: #8b1a1a; }
+.guide { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.guide > div { padding: 12px; border: 1px solid #e4eaf0; border-radius: 8px; background: #fff; }
+.guide .guide-wide { grid-column: 1 / -1; background: #f0f6ff; border-color: #cfe0f8; }
+.guide dt { font-weight: 800; font-size: 14px; }
+.guide dd { margin: 6px 0 0; color: #3d4855; font-size: 13px; line-height: 1.55; }
+@media (max-width: 760px) { .guide { grid-template-columns: 1fr; } .feed-row { grid-template-columns: 14px 1fr; } .feed-row span:last-child { grid-column: 2; } }
+.feed-banner.warn { color: #7a4a00; background: #fff6e0; border-color: #f0d9a0; }
+
+.guide ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 6px; }
+.guide li { color: #3d4855; font-size: 13px; line-height: 1.55; }
