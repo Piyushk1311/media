@@ -142,6 +142,9 @@ const els = {
   controlsToggle: document.querySelector("#controlsToggle"),
   statusText: document.querySelector("#statusText"),
   articleCount: document.querySelector("#articleCount"),
+  updatedChip: document.querySelector("#updatedChip"),
+  updatedTime: document.querySelector("#updatedTime"),
+  updatedAgo: document.querySelector("#updatedAgo"),
   dhCount: document.querySelector("#dhCount"),
   competitorCount: document.querySelector("#competitorCount"),
   clusterCount: document.querySelector("#clusterCount"),
@@ -528,7 +531,43 @@ function saveTrendsSummary() {
   }
 }
 
+// On a developer's computer the page reads feeds live (through server.py). On the published site
+// (GitHub Pages) browsers cannot read news feeds, so it reads data/snapshot.json, which a scheduled
+// GitHub Action refreshes about every 30 minutes.
+const LIVE_MODE = location.protocol === "file:" || ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+let snapshotNote = "";
+
+async function refreshFromSnapshot() {
+  if (isFetching) return;
+  isFetching = true;
+  els.statusText.textContent = "Loading the latest saved data…";
+  els.statusText.classList.add("is-loading");
+  updateFetchButton();
+  try {
+    const response = await fetch(`./data/snapshot.json?t=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const snapshot = await response.json();
+    if (!Array.isArray(snapshot.articles) || !snapshot.articles.length) throw new Error("empty snapshot");
+    allArticles = snapshot.articles;
+    sourceHealth = snapshot.sourceHealth || [];
+    generatedAt = snapshot.generatedAt || new Date().toISOString();
+    gnSummary = snapshot.gnSummary || null;
+    trendsSummary = snapshot.trendsSummary || null;
+    hasFetchedData = true;
+    snapshotNote = ` Data collected ${formatDate.format(new Date(generatedAt))} and refreshed about every 30 minutes.`;
+  } catch (error) {
+    snapshotNote = "";
+    els.statusText.textContent = "The saved data could not be loaded. Try again in a few minutes.";
+  }
+  filtersDirty = false;
+  isFetching = false;
+  els.statusText.classList.remove("is-loading");
+  updateFetchButton();
+  loadDashboard();
+}
+
 async function refreshFeeds() {
+  if (!LIVE_MODE) return refreshFromSnapshot();
   if (isFetching) return;
   isFetching = true;
   els.statusText.textContent = "Fetching RSS feeds…";
@@ -786,9 +825,37 @@ function loadDashboard() {
   const loaded = sourceHealth.filter((item) => item.ok).length;
   const windowLabel = els.window.selectedOptions[0].text.toLowerCase();
   const status = sourceHealth.length
-    ? `Loaded ${allArticles.length} articles from ${loaded}/${SOURCES.length} feeds. Showing ${articles.length} from the ${windowLabel}.${gnSummary ? (gnSummary.okJobs ? ` Google News: ${gnSummary.dhRanked + gnSummary.compRanked} stories ranked.` : " Google News ranks unavailable.") : ""}`
+    ? `Loaded ${allArticles.length} articles from ${loaded}/${SOURCES.length} feeds. Showing ${articles.length} from the ${windowLabel}.${snapshotNote}${gnSummary ? (gnSummary.okJobs ? ` Google News: ${gnSummary.dhRanked + gnSummary.compRanked} stories ranked.` : " Google News ranks unavailable.") : ""}`
     : "Using starter sample data. Click Fetch to load live RSS.";
   render({ articles, insights, status, refreshInProgress: false });
+}
+
+function timeAgo(iso) {
+  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 1440) return `${Math.floor(minutes / 60)} h ${minutes % 60} min ago`;
+  const days = Math.floor(minutes / 1440);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+// "Last updated" box at the top: when the data on screen was collected.
+function renderUpdated() {
+  if (!hasFetchedData) {
+    els.updatedTime.textContent = "Sample data";
+    els.updatedAgo.textContent = LIVE_MODE ? "Click Fetch for live stories" : "Loading the latest data…";
+    els.updatedChip.classList.remove("stale");
+    els.updatedChip.title = "";
+    return;
+  }
+  const minutes = (Date.now() - Date.parse(generatedAt)) / 60000;
+  const stale = minutes > 120;
+  els.updatedTime.textContent = formatDate.format(new Date(generatedAt));
+  els.updatedAgo.textContent = timeAgo(generatedAt);
+  els.updatedChip.classList.toggle("stale", stale);
+  els.updatedChip.title = stale
+    ? "This data is more than 2 hours old. The scheduled update may be delayed."
+    : LIVE_MODE ? "When you last fetched the feeds." : "The data is collected automatically about every 30 minutes.";
 }
 
 function render({ articles, insights, status, refreshInProgress }) {
@@ -796,6 +863,7 @@ function render({ articles, insights, status, refreshInProgress }) {
   hideHoverCard();
   els.statusText.textContent = refreshInProgress ? "Fetching RSS feeds…" : status;
   els.articleCount.textContent = insights.stats.totalArticles;
+  renderUpdated();
   els.dhCount.textContent = insights.stats.dhArticles;
   els.competitorCount.textContent = insights.stats.competitorArticles;
   els.clusterCount.textContent = insights.stats.clusters;
@@ -1372,3 +1440,7 @@ if (cached?.articles?.length) {
 loadSources();
 loadDashboard();
 updateFetchButton();
+// On the published site, show the latest collected data straight away, without a click.
+if (!LIVE_MODE) refreshFromSnapshot();
+// Keep "x min ago" accurate while the page stays open.
+setInterval(renderUpdated, 60000);
