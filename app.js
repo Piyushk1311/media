@@ -381,6 +381,52 @@ async function enrichWithGoogleNews(articles) {
   };
 }
 
+const TRENDS_URL = "https://trends.google.com/trending/rss?geo=IN";
+let trendsSummary = (() => {
+  try {
+    return JSON.parse(localStorage.getItem("dh-trends-summary"));
+  } catch {
+    return null;
+  }
+})();
+
+function parseTrends(xml) {
+  return [...xml.matchAll(/<item\b[\s\S]*?<\/item>/gi)].map((m, index) => {
+    const block = m[0];
+    const newsTitles = [...block.matchAll(/<ht:news_item_title>([\s\S]*?)<\/ht:news_item_title>/gi)].map((n) => stripHtml(n[1]));
+    return {
+      rank: index + 1,
+      term: stripHtml(tagValue(block, "title")),
+      traffic: stripHtml(tagValue(block, "ht:approx_traffic")),
+      newsTitles
+    };
+  });
+}
+
+async function enrichWithTrends(articles) {
+  for (const article of articles) delete article.trend;
+  const items = parseTrends(await fetchViaProxy(TRENDS_URL));
+  // A story is marked only when it is the same story as a news item Google lists under a trending search.
+  for (const article of articles) {
+    for (const item of items) {
+      if (item.newsTitles.some((title) => titlesMatch(article.title, title))) {
+        article.trend = { term: item.term, traffic: item.traffic, rank: item.rank };
+        break;
+      }
+    }
+  }
+  const summary = { ok: true, terms: items.length, matched: articles.filter((a) => a.trend).length, at: new Date().toISOString() };
+  return summary;
+}
+
+function saveTrendsSummary() {
+  try {
+    localStorage.setItem("dh-trends-summary", JSON.stringify(trendsSummary));
+  } catch {
+    /* storage may be unavailable */
+  }
+}
+
 async function refreshFeeds() {
   if (isFetching) return;
   isFetching = true;
@@ -411,6 +457,12 @@ async function refreshFeeds() {
     } catch {
       gnSummary = null;
     }
+    try {
+      trendsSummary = await enrichWithTrends(allArticles);
+    } catch {
+      trendsSummary = { ok: false, terms: 0, matched: 0, at: new Date().toISOString() };
+    }
+    saveTrendsSummary();
     localStorage.setItem("dh-static-cache", JSON.stringify({ articles: allArticles, sourceHealth, generatedAt, gnSummary }));
   } else {
     const cached = loadCachedArticles();
@@ -821,7 +873,7 @@ function renderCoverage(clusters) {
     return `
       <tr class="row-${status}">
         <th scope="row">
-          <span class="cov-topic">${escapeHtml(cluster.topic)}${trending ? ' <span class="trend-tag" title="Shown in Trending Topics">Trending</span>' : ""}</span>
+          <span class="cov-topic">${escapeHtml(cluster.topic)}${trending ? ' <span class="trend-tag" title="Shown in Trending Topics">Trending</span>' : ""}${cluster.articles.some((a) => a.trend) ? ` <span class="trend-tag search" title="Google Trends: ${escapeAttr([...new Set(cluster.articles.filter((a) => a.trend).map((a) => a.trend.term))].join(", "))}">Trending search</span>` : ""}</span>
         </th>
         ${cells}
         <td><span class="badge ${statusClass[status]} hover-trigger" tabindex="0" role="button" data-title="${statusLabel[status]} · ${escapeAttr(cluster.topic)}" data-list="${listRef(cluster.articles)}">${statusLabel[status]}</span></td>
@@ -887,6 +939,8 @@ function renderFeedHealth() {
     else if (gnSummary.okJobs < gnSummary.jobs) warnings.push({ level: "warn", name: "Google News", text: `${gnSummary.okJobs} of ${gnSummary.jobs} lookups worked, so some Google News positions may be missing.` });
   }
 
+  if (trendsSummary && !trendsSummary.ok) warnings.push({ level: "bad", name: "Google Trends", text: "Trending searches could not be loaded, so no trending-search badges are shown." });
+
   const checked = sourceHealth.length;
   const checkedAt = checked ? `Last checked ${formatDate.format(new Date(generatedAt))}` : "";
   const banner = !checked
@@ -933,6 +987,10 @@ function renderSources(items) {
 function renderStories(articles) {
   els.stories.innerHTML = "";
   if (!articles.length) return empty(els.stories, "No stories match this filter.");
+  const trendingOf = new Map();
+  clusterArticles(articles).slice(0, TRENDING_COUNT).forEach((cluster) => {
+    for (const story of cluster.articles) trendingOf.set(story, cluster);
+  });
   for (const article of articles.slice(0, 18)) {
     const node = document.createElement("article");
     node.className = "story";
@@ -947,7 +1005,9 @@ function renderStories(articles) {
       <div class="story-body">
         <div class="story-meta">
           <span class="badge ${article.sourceType === "primary" ? "teal" : "gold"}">${escapeHtml(article.sourceName)}</span>
+          ${trendingOf.has(article) ? `<span class="trend-tag" title="Part of a top trending topic: ${escapeAttr(trendingOf.get(article).topic)} (${trendingOf.get(article).articles.length} stories)">Trending</span>` : ""}
           ${article.gnRank ? `<span class="badge gn" title="Position in Google News results (${escapeAttr(article.gnQuery || "")})">Google News #${article.gnRank}</span>` : ""}
+          ${article.trend ? `<span class="badge gt" title="Google Trends (India): people are searching &quot;${escapeAttr(article.trend.term)}&quot;. This story is one of the news items Google lists under that trend.">Trending: ${escapeHtml(article.trend.term)}${article.trend.traffic ? ` · ${escapeHtml(article.trend.traffic)}` : ""}</span>` : ""}
           <time datetime="${escapeAttr(article.publishedAt)}">${formatDate.format(new Date(article.publishedAt))}</time>
         </div>
         <h4>${escapeHtml(article.title)}</h4>

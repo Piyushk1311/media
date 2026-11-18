@@ -14,6 +14,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 PORT = 8123
 ALLOWED_HOSTS = {
     "news.google.com",
+    "trends.google.com",
     "www.deccanherald.com",
     "www.thehindu.com",
     "www.thequint.com",

@@ -791,3 +791,7 @@ body { background: var(--paper); }
 
 .guide ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 6px; }
 .guide li { color: #3d4855; font-size: 13px; line-height: 1.55; }
+
+/* Google Trends marker */
+.badge.gt { color: #fff; background: #6d28d9; }
+.trend-tag.search { color: #4c1d95; background: #ede4ff; }
