@@ -9,7 +9,7 @@ const SOURCES = [
     id: "hindu",
     name: "The Hindu",
     type: "competitor",
-    rss: "https://www.thehindu.com/news/national/karnataka/feeder/default.rss"
+    rss: "https://www.thehindu.com/feeder/default.rss"
   },
   {
     id: "quint",
@@ -21,19 +21,71 @@ const SOURCES = [
     id: "toi",
     name: "Times of India",
     type: "competitor",
-    rss: "https://timesofindia.indiatimes.com/rssfeeds/-2128833038.cms"
+    rss: "https://timesofindia.indiatimes.com/rssfeedmostrecent.cms"
   },
   {
     id: "ndtv",
     name: "NDTV",
     type: "competitor",
-    rss: "https://feeds.feedburner.com/ndtvnews-india-news"
+    rss: "https://feeds.feedburner.com/ndtvnews-latest"
   },
   {
     id: "india-today",
     name: "India Today",
     type: "competitor",
-    rss: "https://www.indiatoday.in/rss/1206578"
+    rss: "https://www.indiatoday.in/rss/home"
+  },
+  {
+    id: "ht",
+    name: "Hindustan Times",
+    type: "competitor",
+    rss: "https://www.hindustantimes.com/feeds/rss/latest/rssfeed.xml"
+  },
+  {
+    id: "iexp",
+    name: "Indian Express",
+    type: "competitor",
+    rss: "https://indianexpress.com/feed/"
+  },
+  {
+    id: "dchron",
+    name: "Deccan Chronicle",
+    type: "competitor",
+    rss: "https://www.deccanchronicle.com/rss_feed"
+  },
+  {
+    id: "tnm",
+    name: "The News Minute",
+    type: "competitor",
+    rss: "https://www.thenewsminute.com/feed"
+  },
+  {
+    id: "mint",
+    name: "Livemint",
+    type: "competitor",
+    gnNames: ["Mint"], // how Google News spells this outlet
+    rss: ["news", "companies", "markets", "politics", "technology", "money", "sports", "opinion"].map((section) => `https://www.livemint.com/rss/${section}`)
+  },
+  {
+    id: "news18",
+    name: "News18",
+    type: "competitor",
+    rss: ["india", "world", "politics", "business", "sports", "movies", "tech", "lifestyle-2"].map((section) => `https://www.news18.com/commonfeeds/v1/eng/rss/${section}.xml`)
+  },
+  {
+    id: "et",
+    name: "Economic Times",
+    type: "competitor",
+    rss: "https://economictimes.indiatimes.com/rssfeedsdefault.cms"
+  },
+  {
+    // Moneycontrol's own RSS feeds are years out of date, so its stories are read from a Google News
+    // search restricted to moneycontrol.com. Links are Google News redirect links.
+    id: "mc",
+    name: "Moneycontrol",
+    type: "competitor",
+    kind: "googlenews",
+    rss: "https://news.google.com/rss/search?q=site%3Amoneycontrol.com+when%3A2d&hl=en-IN&gl=IN&ceid=IN%3Aen"
   }
 ];
 
@@ -79,6 +131,7 @@ const SAMPLE_ARTICLES = [
 
 const els = {
   filters: document.querySelector("#filters"),
+  window: document.querySelector("#timeWindow"),
   search: document.querySelector("#search"),
   source: document.querySelector("#source"),
   from: document.querySelector("#from"),
@@ -87,9 +140,7 @@ const els = {
   refreshBtn: document.querySelector("#refreshBtn"),
   controls: document.querySelector("#controls"),
   controlsToggle: document.querySelector("#controlsToggle"),
-  exportLink: document.querySelector("#exportLink"),
   statusText: document.querySelector("#statusText"),
-  aiMode: document.querySelector("#aiMode"),
   articleCount: document.querySelector("#articleCount"),
   dhCount: document.querySelector("#dhCount"),
   competitorCount: document.querySelector("#competitorCount"),
@@ -98,18 +149,16 @@ const els = {
   updatedAt: document.querySelector("#updatedAt"),
   trendingTopics: document.querySelector("#trendingTopics"),
   keywords: document.querySelector("#keywords"),
-  missingAngles: document.querySelector("#missingAngles"),
-  followUps: document.querySelector("#followUps"),
-  explainers: document.querySelector("#explainers"),
   coverage: document.querySelector("#coverage"),
-  dynamicSources: document.querySelector("#dynamicSources"),
   stories: document.querySelector("#stories"),
   feedChecked: document.querySelector("#feedChecked"),
   feedWarnings: document.querySelector("#feedWarnings"),
   feedList: document.querySelector("#feedList"),
   guideWindow: document.querySelector("#guideWindow"),
   guidePrimary: document.querySelector("#guidePrimary"),
-  guideCompetitors: document.querySelector("#guideCompetitors")
+  guideCompetitors: document.querySelector("#guideCompetitors"),
+  storyControls: document.querySelector("#storyControls"),
+  storyPager: document.querySelector("#storyPager")
 };
 
 let allArticles = SAMPLE_ARTICLES;
@@ -206,14 +255,24 @@ function parseFeed(xml, source) {
   const itemBlocks = [...xml.matchAll(/<item\b[\s\S]*?<\/item>/gi)].map((m) => m[0]);
   const entryBlocks = itemBlocks.length ? itemBlocks : [...xml.matchAll(/<entry\b[\s\S]*?<\/entry>/gi)].map((m) => m[0]);
 
-  return entryBlocks.slice(0, 35).map((block, index) => {
-    const title = stripHtml(tagValue(block, "title"));
-    const summary = stripHtml(tagValue(block, "description") || tagValue(block, "summary") || tagValue(block, "content:encoded"));
+  const isGn = source.kind === "googlenews";
+  // Google News lists results by relevance, so take the newest first.
+  const ordered = isGn
+    ? entryBlocks.slice().sort((a, b) => Date.parse(tagValue(b, "pubDate")) - Date.parse(tagValue(a, "pubDate")))
+    : entryBlocks;
+
+  return ordered.slice(0, 35).map((block, index) => {
+    let title = stripHtml(tagValue(block, "title"));
+    if (isGn) {
+      const cut = title.lastIndexOf(" - ");
+      if (cut > 0) title = title.slice(0, cut); // drop the " - Publisher" suffix Google adds
+    }
+    const summary = isGn ? "" : stripHtml(tagValue(block, "description") || tagValue(block, "summary") || tagValue(block, "content:encoded"));
     const linkMatch = block.match(/<link[^>]+href=["']([^"']+)["']/i);
-    const link = decodeEntities(tagValue(block, "link") || (linkMatch && linkMatch[1]) || source.rss);
+    const link = decodeEntities(tagValue(block, "link") || (linkMatch && linkMatch[1]) || [source.rss].flat()[0]);
     const rawDate = tagValue(block, "pubDate") || tagValue(block, "published") || tagValue(block, "updated");
     const publishedAt = Number.isNaN(Date.parse(rawDate)) ? new Date().toISOString() : new Date(rawDate).toISOString();
-    const bodyRaw = tagValue(block, "content:encoded") || tagValue(block, "description") || tagValue(block, "summary") || tagValue(block, "content");
+    const bodyRaw = isGn ? "" : tagValue(block, "content:encoded") || tagValue(block, "description") || tagValue(block, "summary") || tagValue(block, "content");
     const body = stripHtml(bodyRaw).slice(0, 4000);
     const inlineImage = (bodyRaw.match(/<img[^>]+src=["']([^"']+)["']/i) || [])[1] || "";
     const tags = extractTags(block);
@@ -241,14 +300,26 @@ function localProxyUrl(target) {
   return `./proxy?url=${encodeURIComponent(target)}`;
 }
 
-async function fetchFeed(source) {
-  const urls = [
-    localProxyUrl(source.rss),
-    source.rss,
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(source.rss)}`,
-    `https://corsproxy.io/?${encodeURIComponent(source.rss)}`
-  ];
+async function mapPool(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
 
+async function fetchOneFeed(source, feedUrl) {
+  const urls = [
+    localProxyUrl(feedUrl),
+    feedUrl,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}`,
+    `https://corsproxy.io/?${encodeURIComponent(feedUrl)}`
+  ];
   const errors = [];
   for (const url of urls) {
     try {
@@ -269,6 +340,29 @@ async function fetchFeed(source) {
     errors[errors.length - 1] ||
     "Feed unavailable";
   throw new Error(best);
+}
+
+const MERGED_LIMIT = 50;
+
+async function fetchFeed(source) {
+  const feeds = Array.isArray(source.rss) ? source.rss : [source.rss];
+  if (feeds.length === 1) return fetchOneFeed(source, feeds[0]);
+
+  // Several section feeds make up one outlet: merge them, drop duplicates, keep the newest.
+  const settled = await mapPool(feeds, 3, async (feedUrl) => {
+    try {
+      return { items: await fetchOneFeed(source, feedUrl) };
+    } catch (error) {
+      return { error };
+    }
+  });
+  const merged = settled.flatMap((r) => r.items || []);
+  if (!merged.length) throw settled.find((r) => r.error)?.error || new Error("Feed unavailable");
+  const seen = new Set();
+  return merged
+    .filter((article) => (seen.has(article.link) ? false : seen.add(article.link)))
+    .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
+    .slice(0, MERGED_LIMIT);
 }
 
 const GN_BASE = "https://news.google.com/rss";
@@ -311,6 +405,11 @@ function normPublisher(name = "") {
   return name.toLowerCase().replace(/\.com|\.in|\bthe\b/g, "").replace(/[^a-z]/g, "");
 }
 
+function gnOutletNames(article) {
+  const source = SOURCES.find((s) => s.id === article.sourceId);
+  return [normPublisher(article.sourceName), ...((source && source.gnNames) || []).map(normPublisher)];
+}
+
 function titleWords(title) {
   return new Set(
     title.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !STOP_WORDS.has(w))
@@ -331,13 +430,15 @@ async function enrichWithGoogleNews(articles) {
     delete article.gnRank;
     delete article.gnQuery;
   }
-  const topClusters = clusterArticles(articles).slice(0, 12);
+  // Look up the biggest topics of the last 24 hours, to match the dashboard's default time window.
+  const fresh = articles.filter((a) => Date.now() - Date.parse(a.publishedAt) <= 24 * 36e5);
+  const topClusters = clusterArticles(fresh.length ? fresh : articles).slice(0, 12);
   const jobs = [
     { label: "Top stories (India)", url: `${GN_BASE}?${GN_LOCALE}` },
     { label: "Karnataka & Bengaluru", url: `${GN_BASE}/search?q=${encodeURIComponent("Karnataka OR Bengaluru when:1d")}&${GN_LOCALE}` },
     ...topClusters.map((cluster) => ({
       label: cluster.topic,
-      url: `${GN_BASE}/search?q=${encodeURIComponent(`${cluster.keywords.slice(0, 3).join(" ")} when:2d`)}&${GN_LOCALE}`
+      url: `${GN_BASE}/search?q=${encodeURIComponent(`${cluster.keywords.slice(0, 3).join(" ")} when:1d`)}&${GN_LOCALE}`
     }))
   ];
 
@@ -350,11 +451,11 @@ async function enrichWithGoogleNews(articles) {
         const items = parseGoogleNews(await fetchViaProxy(job.url));
         okJobs += 1;
         for (const article of articles) {
-          const outlet = normPublisher(article.sourceName);
+          const outlets = gnOutletNames(article);
           for (const item of items) {
             if (article.gnRank && article.gnRank <= item.rank) break;
             const pub = normPublisher(item.publisher);
-            const samePublisher = pub && outlet && (pub.includes(outlet) || outlet.includes(pub));
+            const samePublisher = Boolean(pub) && outlets.includes(pub);
             if (samePublisher && titlesMatch(article.title, item.title)) {
               article.gnRank = item.rank;
               article.gnQuery = job.label;
@@ -436,12 +537,18 @@ async function refreshFeeds() {
   const articles = [];
   const health = [];
 
-  for (const source of SOURCES) {
+  const outcomes = await mapPool(SOURCES, 4, async (source) => {
     try {
-      const parsed = await fetchFeed(source);
+      return { source, parsed: await fetchFeed(source) };
+    } catch (error) {
+      return { source, error };
+    }
+  });
+  for (const { source, parsed, error } of outcomes) {
+    if (parsed) {
       articles.push(...parsed);
       health.push({ sourceId: source.id, name: source.name, ok: true, count: parsed.length });
-    } catch (error) {
+    } else {
       health.push({ sourceId: source.id, name: source.name, ok: false, count: 0, error: error.message });
     }
   }
@@ -547,9 +654,11 @@ function getFilteredArticles() {
   const from = els.from.value ? new Date(els.from.value) : null;
   const to = els.to.value ? new Date(`${els.to.value}T23:59:59`) : null;
   const term = els.search.value.toLowerCase().trim();
+  const cutoff = Date.now() - (Number(els.window.value) || 24) * 36e5; // time window: 24 h, 48 h or 7 days
 
   return allArticles.filter((article) => {
     const published = new Date(article.publishedAt);
+    if (published.getTime() < cutoff) return false;
     const matchesSource = source === "all" || article.sourceId === source || article.sourceType === source;
     const matchesFrom = !from || published >= from;
     const matchesTo = !to || published <= to;
@@ -597,9 +706,7 @@ function buildInsights(articles) {
     missingAngles,
     followUps,
     explainers,
-    dynamicSources: suggestDynamicSources(topKeywords),
-    sourceHealth,
-    aiMode: "Static GitHub Pages mode"
+    sourceHealth
   };
 }
 
@@ -662,27 +769,6 @@ function makeFollowUp(cluster) {
   return `Ask what happens next on ${lead}: timeline, accountable agency, reader impact, and one human-interest case.`;
 }
 
-function suggestDynamicSources(topKeywords) {
-  const terms = topKeywords.slice(0, 3).map((item) => item.keyword).join(" ");
-  return [
-    {
-      name: "Google News Search",
-      reason: `Track fresh outlets ranking for "${terms || "Bengaluru Karnataka"}".`,
-      url: `https://news.google.com/search?q=${encodeURIComponent(terms || "Bengaluru Karnataka")}`
-    },
-    {
-      name: "Bar & Bench",
-      reason: "Useful when courts, governance, or policy keywords are trending.",
-      url: "https://www.barandbench.com/"
-    },
-    {
-      name: "Moneycontrol",
-      reason: "Useful when infrastructure, business, markets, or civic finance angles appear.",
-      url: "https://www.moneycontrol.com/news/"
-    }
-  ];
-}
-
 function loadSources() {
   els.pinWrap.classList.add("hidden");
   for (const source of SOURCES) {
@@ -698,8 +784,9 @@ function loadDashboard() {
   const articles = getFilteredArticles();
   const insights = buildInsights(articles);
   const loaded = sourceHealth.filter((item) => item.ok).length;
+  const windowLabel = els.window.selectedOptions[0].text.toLowerCase();
   const status = sourceHealth.length
-    ? `Loaded ${allArticles.length} articles from ${loaded}/${SOURCES.length} feeds.${gnSummary ? (gnSummary.okJobs ? ` Google News: ${gnSummary.dhRanked + gnSummary.compRanked} stories ranked.` : " Google News ranks unavailable.") : ""}`
+    ? `Loaded ${allArticles.length} articles from ${loaded}/${SOURCES.length} feeds. Showing ${articles.length} from the ${windowLabel}.${gnSummary ? (gnSummary.okJobs ? ` Google News: ${gnSummary.dhRanked + gnSummary.compRanked} stories ranked.` : " Google News ranks unavailable.") : ""}`
     : "Using starter sample data. Click Fetch to load live RSS.";
   render({ articles, insights, status, refreshInProgress: false });
 }
@@ -708,7 +795,6 @@ function render({ articles, insights, status, refreshInProgress }) {
   hoverLists = [];
   hideHoverCard();
   els.statusText.textContent = refreshInProgress ? "Fetching RSS feeds…" : status;
-  els.aiMode.textContent = insights.aiMode;
   els.articleCount.textContent = insights.stats.totalArticles;
   els.dhCount.textContent = insights.stats.dhArticles;
   els.competitorCount.textContent = insights.stats.competitorArticles;
@@ -718,36 +804,37 @@ function render({ articles, insights, status, refreshInProgress }) {
 
   renderTopics(insights.clusters);
   renderKeywords(insights.topKeywords, articles);
-  renderInsights(els.missingAngles, insights.missingAngles, "reason");
-  renderInsights(els.followUps, insights.followUps);
-  renderInsights(els.explainers, insights.explainers);
   renderCoverage(insights.clusters);
   renderFeedHealth();
   renderGuideWindow(articles);
   renderGuideOutlets();
-  renderSources(insights.dynamicSources);
   renderStories(articles);
 }
 
 function renderTopics(clusters) {
   els.trendingTopics.innerHTML = "";
   if (!clusters.length) return empty(els.trendingTopics, "No matching topics.");
+
   for (const cluster of clusters.slice(0, 9)) {
     const node = document.createElement("article");
     node.className = "topic";
     const idsFor = (filter) => listRef(cluster.articles.filter(filter));
-    const sourceChips = cluster.sources.slice(0, 6).map((name) => `<span class="platform hover-trigger" tabindex="0" role="button" data-title="${escapeAttr(name)} · ${escapeAttr(cluster.topic)}" data-list="${escapeAttr(idsFor((a) => a.sourceName === name))}">${escapeHtml(name)}</span>`).join("");
+    // Competitor outlets that covered this topic; DH's own stories are reached through the DH badge.
+    const competitorNames = [...new Set(cluster.articles.filter((a) => a.sourceType === "competitor").map((a) => a.sourceName))];
+    const outletChips = competitorNames.length
+      ? competitorNames.map((name) => `<span class="platform hover-trigger" tabindex="0" role="button" data-title="${escapeAttr(name)} · ${escapeAttr(cluster.topic)}" data-list="${idsFor((a) => a.sourceName === name)}">${escapeHtml(name)}</span>`).join("")
+      : '<span class="topic-none">No competitor has covered this yet</span>';
     node.innerHTML = `
-      <div class="topic-top">
+      <div class="tcol-topic">
         <h4>${escapeHtml(cluster.topic)}</h4>
+        <p class="tkeys" title="${escapeAttr(cluster.keywords.slice(0, 6).join(", "))}">${escapeHtml(cluster.keywords.slice(0, 5).join(" · "))}</p>
+      </div>
+      <div class="tcol-counts">
         <span class="badge ${cluster.competitorCount > cluster.dhCount ? "red" : "teal"}">${cluster.articles.length} stories</span>
+        <span class="badge teal hover-trigger" tabindex="0" role="button" data-title="DH stories · ${escapeAttr(cluster.topic)}" data-list="${idsFor((a) => a.sourceType === "primary")}">DH ${cluster.dhCount}</span>
+        <span class="badge gold hover-trigger" tabindex="0" role="button" data-title="Competitor stories · ${escapeAttr(cluster.topic)}" data-list="${idsFor((a) => a.sourceType === "competitor")}">Competitors ${cluster.competitorCount}</span>
       </div>
-      <div class="platform-row">${sourceChips}</div>
-      <div class="badge-row">
-        <span class="badge teal hover-trigger" tabindex="0" role="button" data-title="DH stories · ${escapeAttr(cluster.topic)}" data-list="${escapeAttr(idsFor((a) => a.sourceType === "primary"))}">DH ${cluster.dhCount}</span>
-        <span class="badge gold hover-trigger" tabindex="0" role="button" data-title="Competitor stories · ${escapeAttr(cluster.topic)}" data-list="${escapeAttr(idsFor((a) => a.sourceType === "competitor"))}">Competitors ${cluster.competitorCount}</span>
-        ${cluster.keywords.slice(0, 5).map((keyword) => `<span class="badge">${escapeHtml(keyword)}</span>`).join("")}
-      </div>
+      <div class="tcol-outlets">${outletChips}</div>
     `;
     els.trendingTopics.appendChild(node);
   }
@@ -768,29 +855,37 @@ function renderKeywords(keywords, articles = []) {
   }
 }
 
-function renderInsights(container, items, metaKey) {
-  container.innerHTML = "";
-  if (!items.length) return empty(container, "No items for the current filter.");
-  for (const item of items) {
-    const node = document.createElement("article");
-    node.className = "insight";
-    const keywordBadges = item.keywords?.length
-      ? `<div class="badge-row">${item.keywords.map((keyword) => `<span class="badge">${escapeHtml(keyword)}</span>`).join("")}</div>`
-      : "";
-    const priority = item.priority ? `<span class="badge ${item.priority === "High" ? "red" : item.priority === "Medium" ? "gold" : "teal"}">${escapeHtml(item.priority)}</span>` : "";
-    node.innerHTML = `
-      <div class="insight-title">
-        <h4>${escapeHtml(item.topic)}</h4>
-        ${priority}
-      </div>
-      ${metaKey && item[metaKey] ? `<p><strong>${escapeHtml(item[metaKey])}</strong></p>` : ""}
-      <p>${escapeHtml(item.suggestion)}</p>
-      ${item.evidence ? `<p>${escapeHtml(item.evidence)}</p>` : ""}
-      ${item.readerQuestion ? `<p><strong>${escapeHtml(item.readerQuestion)}</strong></p>` : ""}
-      ${item.assignment ? `<p>${escapeHtml(item.assignment)}</p>` : ""}
-      ${keywordBadges}
-    `;
-    container.appendChild(node);
+const COMPARE_PROMPT = "Compare the stories below based on content quality and SEO, covering all aspects including technical SEO (page speed, mobile experience, structured data, canonical and meta tags, headline and title optimisation, internal linking, image optimisation and crawlability). Suggest how Deccan Herald stories can be made better than the competitors.";
+const COPY_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>';
+const CHECK_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+
+function comparisonText(stories) {
+  const lines = [COMPARE_PROMPT, ""];
+  for (const source of SOURCES) {
+    const urls = [...new Set(stories.filter((a) => a.sourceId === source.id).map((a) => a.link))];
+    if (!urls.length) continue;
+    lines.push(`${source.name}:`, ...urls, "");
+  }
+  if (stories.some((a) => /news\.google\.com/.test(a.link))) {
+    lines.push("Note: links on news.google.com are Google News redirect links. Open them to reach the original article.");
+  }
+  return lines.join("\n").trim();
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    return ok;
   }
 }
 
@@ -873,10 +968,11 @@ function renderCoverage(clusters) {
     return `
       <tr class="row-${status}">
         <th scope="row">
-          <span class="cov-topic">${escapeHtml(cluster.topic)}${trending ? ' <span class="trend-tag" title="Shown in Trending Topics">Trending</span>' : ""}${cluster.articles.some((a) => a.trend) ? ` <span class="trend-tag search" title="Google Trends: ${escapeAttr([...new Set(cluster.articles.filter((a) => a.trend).map((a) => a.trend.term))].join(", "))}">Trending search</span>` : ""}</span>
+          <span class="cov-topic">${escapeHtml(cluster.topic)}${trending ? ' <span class="trend-tag" title="One of the top topics shown in the Trending Topics block">In a top topic</span>' : ""}${cluster.articles.some((a) => a.trend) ? ` <span class="trend-tag search" title="Google Trends: ${escapeAttr([...new Set(cluster.articles.filter((a) => a.trend).map((a) => a.trend.term))].join(", "))}">Trending search</span>` : ""}</span>
         </th>
         ${cells}
-        <td><span class="badge ${statusClass[status]} hover-trigger" tabindex="0" role="button" data-title="${statusLabel[status]} · ${escapeAttr(cluster.topic)}" data-list="${listRef(cluster.articles)}">${statusLabel[status]}</span></td>
+        <td class="status-cell"><span class="badge ${statusClass[status]} hover-trigger" tabindex="0" role="button" data-title="${statusLabel[status]} · ${escapeAttr(cluster.topic)}" data-list="${listRef(cluster.articles)}">${statusLabel[status]}</span></td>
+        <td class="copy-cell"><button type="button" class="cov-copy" data-list="${listRef(cluster.articles)}" title="Copy prompt and story links" aria-label="Copy comparison prompt and story links for ${escapeAttr(cluster.topic)}">${COPY_ICON}</button></td>
       </tr>`;
   }).join("");
 
@@ -897,7 +993,7 @@ function renderCoverage(clusters) {
     ${filters}
     <div class="cov-table-wrap">
       <table class="cov-table">
-        <thead><tr><th scope="col">Topic</th>${head}<th scope="col">Status</th></tr></thead>
+        <thead><tr><th scope="col">Topic</th>${head}<th scope="col">Status</th><th scope="col" class="copy-col"><span class="sr-only">Copy prompt and links</span></th></tr></thead>
         <tbody>${body}</tbody>
       </table>
     </div>`;
@@ -968,30 +1064,99 @@ function renderGuideWindow(articles) {
   const from = Math.min(...times);
   const to = Math.max(...times);
   const hours = Math.max(1, Math.round((to - from) / 36e5));
-  els.guideWindow.textContent = `Right now they use ${articles.length} stories published from ${formatDate.format(new Date(from))} to ${formatDate.format(new Date(to))} (about ${hours} hour${hours === 1 ? "" : "s"}).`;
+  els.guideWindow.textContent = `Right now the window is the ${els.window.selectedOptions[0].text.toLowerCase()} and they use ${articles.length} stories published from ${formatDate.format(new Date(from))} to ${formatDate.format(new Date(to))} (about ${hours} hour${hours === 1 ? "" : "s"}).`;
 }
 
-function renderSources(items) {
-  els.dynamicSources.innerHTML = "";
-  for (const item of items) {
-    const node = document.createElement("article");
-    node.className = "source-item";
-    node.innerHTML = `
-      <h4><a href="${escapeAttr(item.url)}" target="_blank" rel="noreferrer">${escapeHtml(item.name)}</a></h4>
-      <p>${escapeHtml(item.reason)}</p>
-    `;
-    els.dynamicSources.appendChild(node);
-  }
+const storyView = { outlet: "all", show: "all", sort: "newest", pageSize: 12, page: 1 };
+let lastStoryArticles = [];
+
+function pageList(current, last) {
+  const nums = [...new Set([1, last, current - 1, current, current + 1])].filter((n) => n >= 1 && n <= last).sort((a, b) => a - b);
+  const out = [];
+  nums.forEach((n, i) => {
+    if (i && n - nums[i - 1] > 1) out.push("…");
+    out.push(n);
+  });
+  return out;
 }
 
 function renderStories(articles) {
+  lastStoryArticles = articles;
+  const focusId = document.activeElement && document.activeElement.closest && document.activeElement.closest("#storyControls") ? document.activeElement.id : "";
   els.stories.innerHTML = "";
+  els.storyControls.innerHTML = "";
+  els.storyPager.innerHTML = "";
   if (!articles.length) return empty(els.stories, "No stories match this filter.");
   const trendingOf = new Map();
   clusterArticles(articles).slice(0, TRENDING_COUNT).forEach((cluster) => {
     for (const story of cluster.articles) trendingOf.set(story, cluster);
   });
-  for (const article of articles.slice(0, 18)) {
+
+  // --- filters, sorting and counts for the dropdowns
+  const outletList = SOURCES.filter((source) => articles.some((a) => a.sourceId === source.id));
+  if (storyView.outlet !== "all" && !outletList.some((source) => source.id === storyView.outlet)) storyView.outlet = "all";
+  const inOutlet = articles.filter((a) => storyView.outlet === "all" || a.sourceId === storyView.outlet);
+  const showTests = {
+    all: () => true,
+    trend: (a) => Boolean(a.trend),
+    gn: (a) => Boolean(a.gnRank),
+    topic: (a) => trendingOf.has(a)
+  };
+  const showLabels = [
+    ["all", "All stories"],
+    ["trend", "Trending search (Google Trends)"],
+    ["gn", "Ranked on Google News"],
+    ["topic", "In a top topic"]
+  ];
+  const sortLabels = [
+    ["newest", "Newest first"],
+    ["oldest", "Oldest first"],
+    ["rank", "Google News rank (best first)"],
+    ["trend", "Trending search first"],
+    ["outlet", "Outlet (A to Z)"]
+  ];
+  const newest = (a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt);
+  const sorters = {
+    newest,
+    oldest: (a, b) => -newest(a, b),
+    rank: (a, b) => (a.gnRank || 1e9) - (b.gnRank || 1e9) || newest(a, b),
+    trend: (a, b) => Number(Boolean(b.trend)) - Number(Boolean(a.trend)) || newest(a, b),
+    outlet: (a, b) => a.sourceName.localeCompare(b.sourceName) || newest(a, b)
+  };
+  const filtered = inOutlet.filter(showTests[storyView.show] || showTests.all).sort(sorters[storyView.sort] || newest);
+
+  els.storyControls.innerHTML = `
+    <label>Outlet
+      <select id="svOutlet" class="cov-select">
+        <option value="all" ${storyView.outlet === "all" ? "selected" : ""}>All outlets (${articles.length})</option>
+        ${outletList.map((source) => `<option value="${source.id}" ${storyView.outlet === source.id ? "selected" : ""}>${escapeHtml(source.name)} (${articles.filter((a) => a.sourceId === source.id).length})</option>`).join("")}
+      </select>
+    </label>
+    <label>Show
+      <select id="svShow" class="cov-select">
+        ${showLabels.map(([key, label]) => `<option value="${key}" ${storyView.show === key ? "selected" : ""}>${label} (${inOutlet.filter(showTests[key]).length})</option>`).join("")}
+      </select>
+    </label>
+    <label>Sort by
+      <select id="svSort" class="cov-select">
+        ${sortLabels.map(([key, label]) => `<option value="${key}" ${storyView.sort === key ? "selected" : ""}>${label}</option>`).join("")}
+      </select>
+    </label>
+    <label>Per page
+      <select id="svSize" class="cov-select">
+        ${[12, 24, 48].map((n) => `<option value="${n}" ${storyView.pageSize === n ? "selected" : ""}>${n}</option>`).join("")}
+      </select>
+    </label>`;
+  if (focusId) document.getElementById(focusId)?.focus();
+
+  if (!filtered.length) return empty(els.stories, "No stories match these filters. Try a different filter.");
+
+  const pages = Math.max(1, Math.ceil(filtered.length / storyView.pageSize));
+  storyView.page = Math.min(Math.max(1, storyView.page), pages);
+  const start = (storyView.page - 1) * storyView.pageSize;
+  const pageItems = filtered.slice(start, start + storyView.pageSize);
+
+  for (const article of pageItems) {
     const node = document.createElement("article");
     node.className = "story";
     const text = article.body || article.summary || "No summary available.";
@@ -1005,7 +1170,7 @@ function renderStories(articles) {
       <div class="story-body">
         <div class="story-meta">
           <span class="badge ${article.sourceType === "primary" ? "teal" : "gold"}">${escapeHtml(article.sourceName)}</span>
-          ${trendingOf.has(article) ? `<span class="trend-tag" title="Part of a top trending topic: ${escapeAttr(trendingOf.get(article).topic)} (${trendingOf.get(article).articles.length} stories)">Trending</span>` : ""}
+          ${trendingOf.has(article) ? `<span class="trend-tag" title="Part of a top topic: ${escapeAttr(trendingOf.get(article).topic)} (${trendingOf.get(article).articles.length} stories)">In a top topic</span>` : ""}
           ${article.gnRank ? `<span class="badge gn" title="Position in Google News results (${escapeAttr(article.gnQuery || "")})">Google News #${article.gnRank}</span>` : ""}
           ${article.trend ? `<span class="badge gt" title="Google Trends (India): people are searching &quot;${escapeAttr(article.trend.term)}&quot;. This story is one of the news items Google lists under that trend.">Trending: ${escapeHtml(article.trend.term)}${article.trend.traffic ? ` · ${escapeHtml(article.trend.traffic)}` : ""}</span>` : ""}
           <time datetime="${escapeAttr(article.publishedAt)}">${formatDate.format(new Date(article.publishedAt))}</time>
@@ -1024,7 +1189,32 @@ function renderStories(articles) {
     `;
     els.stories.appendChild(node);
   }
+
+  const info = `Showing ${start + 1}\u2013${start + pageItems.length} of ${filtered.length} ${filtered.length === 1 ? "story" : "stories"}`;
+  const buttons = pages > 1
+    ? `<button type="button" class="pg" data-page="${storyView.page - 1}" ${storyView.page === 1 ? "disabled" : ""} aria-label="Previous page">\u2039 Prev</button>
+       ${pageList(storyView.page, pages).map((n) => (n === "\u2026" ? '<span class="pg-gap">\u2026</span>' : `<button type="button" class="pg ${n === storyView.page ? "active" : ""}" data-page="${n}" ${n === storyView.page ? 'aria-current="page"' : ""}>${n}</button>`)).join("")}
+       <button type="button" class="pg" data-page="${storyView.page + 1}" ${storyView.page === pages ? "disabled" : ""} aria-label="Next page">Next \u203a</button>`
+    : "";
+  els.storyPager.innerHTML = `<span class="pager-info">${info}</span><div class="pager-buttons">${buttons}</div>`;
 }
+
+els.storyControls.addEventListener("change", (event) => {
+  const keys = { svOutlet: "outlet", svShow: "show", svSort: "sort", svSize: "pageSize" };
+  const key = keys[event.target.id];
+  if (!key) return;
+  storyView[key] = key === "pageSize" ? Number(event.target.value) : event.target.value;
+  storyView.page = 1;
+  renderStories(lastStoryArticles);
+});
+
+els.storyPager.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-page]");
+  if (!button || button.disabled) return;
+  storyView.page = Number(button.dataset.page);
+  renderStories(lastStoryArticles);
+  els.storyControls.scrollIntoView({ block: "start", behavior: "smooth" });
+});
 
 const hoverCard = document.createElement("div");
 hoverCard.className = "hover-card hidden";
@@ -1106,7 +1296,20 @@ els.coverage.addEventListener("change", (event) => {
   renderCoverage(lastCoverageClusters);
 });
 
-els.coverage.addEventListener("click", (event) => {
+els.coverage.addEventListener("click", async (event) => {
+  const copy = event.target.closest(".cov-copy");
+  if (copy) {
+    const ok = await copyText(comparisonText(hoverLists[Number(copy.dataset.list)] || []));
+    copy.innerHTML = ok ? CHECK_ICON : COPY_ICON;
+    copy.classList.toggle("copied", ok);
+    copy.title = ok ? "Copied!" : "Copy failed. Select and copy manually.";
+    setTimeout(() => {
+      copy.innerHTML = COPY_ICON;
+      copy.classList.remove("copied");
+      copy.title = "Copy prompt and story links";
+    }, 1800);
+    return;
+  }
   const button = event.target.closest(".cov-filter");
   if (!button) return;
   coverageFilter = button.dataset.filter;
@@ -1120,26 +1323,6 @@ els.stories.addEventListener("click", (event) => {
   button.textContent = expanded ? "Show less" : "Read more";
   button.setAttribute("aria-expanded", String(expanded));
 });
-
-function exportCsv() {
-  const articles = getFilteredArticles();
-  const insights = buildInsights(articles);
-  const rows = [
-    ["type", "topic", "source", "title", "published_at", "link", "suggestion"],
-    ...articles.map((article) => ["article", "", article.sourceName, article.title, article.publishedAt, article.link, ""]),
-    ...insights.missingAngles.map((item) => ["missing_angle", item.topic, "", "", "", "", `${item.suggestion} ${item.evidence || ""}`]),
-    ...insights.followUps.map((item) => ["follow_up", item.topic, "", "", "", "", item.suggestion]),
-    ...insights.explainers.map((item) => ["explainer", item.topic, "", "", "", "", item.suggestion])
-  ];
-  const csv = rows.map((row) => row.map((cell) => `"${String(cell || "").replace(/"/g, '""')}"`).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "dh-editorial-intelligence.csv";
-  link.click();
-  URL.revokeObjectURL(url);
-}
 
 function empty(container, message) {
   const node = document.createElement("div");
@@ -1177,10 +1360,6 @@ els.filters.addEventListener("input", debounce(loadDashboard));
 els.source.addEventListener("change", markFiltersDirty);
 els.source.addEventListener("change", loadDashboard);
 els.refreshBtn.addEventListener("click", refreshFeeds);
-els.exportLink.addEventListener("click", (event) => {
-  event.preventDefault();
-  exportCsv();
-});
 
 const cached = loadCachedArticles();
 if (cached?.articles?.length) {

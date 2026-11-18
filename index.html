@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DH Editorial Intelligence</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20261118f" />
   </head>
   <body>
     <div class="app-shell">
@@ -19,7 +19,6 @@
             </div>
           </div>
           <div class="top-actions">
-            <span id="aiMode" class="mode-chip">AI mode</span>
             <div class="clock">
               <span id="articleCount">0</span>
               <small>stories tracked</small>
@@ -42,6 +41,14 @@
                       <option value="competitor">Competitors</option>
                     </select>
                   </label>
+                  <label>
+                    Time window
+                    <select id="timeWindow" name="window">
+                      <option value="24" selected>Last 24 hours</option>
+                      <option value="48">Last 48 hours</option>
+                      <option value="168">Last 7 days</option>
+                    </select>
+                  </label>
                   <div class="date-grid">
                     <label>
                       From
@@ -62,10 +69,6 @@
                     <span class="btn-icon" aria-hidden="true">⇣</span>
                     <span class="btn-label">Fetch</span>
                   </button>
-                  <a id="exportLink" class="button ghost" href="#" title="Export CSV">
-                    <span aria-hidden="true">⇩</span>
-                    CSV
-                  </a>
                 </div>
               </div>
             </div>
@@ -123,40 +126,10 @@
             <div class="panel-head">
               <h3>Latest Stories</h3>
             </div>
-            <p class="panel-desc">Newest headlines from all tracked feeds, with links to the originals.</p>
+            <p class="panel-desc">Every loaded story, newest first by default. Use the dropdowns to filter and sort, and the page buttons to move through them.</p>
+            <div id="storyControls" class="story-controls"></div>
             <div id="stories" class="story-list"></div>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <h3>Missing Angles</h3>
-            </div>
-            <p class="panel-desc">Topics competitors are covering that DH has not yet reported on.</p>
-            <div id="missingAngles" class="insight-list"></div>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <h3>Follow-ups</h3>
-            </div>
-            <p class="panel-desc">Suggested next-day follow-up stories for topics already in the news.</p>
-            <div id="followUps" class="insight-list"></div>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <h3>Explainers</h3>
-            </div>
-            <p class="panel-desc">Topics that could use a background piece explaining what changed and who is affected.</p>
-            <div id="explainers" class="insight-list"></div>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <h3>Dynamic Sources</h3>
-            </div>
-            <p class="panel-desc">Extra places to check for more reporting on the trending keywords.</p>
-            <div id="dynamicSources" class="source-list"></div>
+            <nav id="storyPager" class="pager" aria-label="Story pages"></nav>
           </div>
 
         </section>
@@ -179,19 +152,19 @@
           <dl class="guide">
             <div class="guide-wide">
               <dt>What time period do Trending Topics and Top Keywords cover?</dt>
-              <dd>They look only at the stories currently loaded from the news feeds. Each outlet's feed lists its most recent stories, so a busy outlet covers a shorter stretch of time than a quiet one. <strong id="guideWindow"></strong> The date filters in the filter menu narrow this further, and clicking Fetch or Refresh brings in newer stories. Nothing older than what the feeds still list is included.</dd>
+              <dd>They use only the stories published inside the <strong>time window</strong> you choose in the filter menu: the last 24 hours by default, or the last 48 hours or 7 days. The same window applies to every outlet, so they are compared fairly. <strong id="guideWindow"></strong> The From and To date filters narrow it further, and clicking Fetch or Refresh brings in newer stories. A feed only lists an outlet's most recent stories, so a very busy outlet may not fill a long window.</dd>
             </div>
             <div class="guide-wide">
               <dt>Who is compared?</dt>
-              <dd><strong>Our paper:</strong> <span id="guidePrimary"></span><br /><strong>Competitors:</strong> <span id="guideCompetitors"></span>. Anything labelled "competitor" in this dashboard means one of these outlets.</dd>
+              <dd><strong>Our paper:</strong> <span id="guidePrimary"></span><br /><strong>Competitors:</strong> <span id="guideCompetitors"></span>. Anything labelled "competitor" in this dashboard means one of these outlets.<br /><strong>Where their stories come from:</strong> each outlet's feed covers all kinds of stories, not one section. Livemint and News18 have no single all-sections feed, so several of their section feeds are combined. Moneycontrol's own feeds are out of date, so its stories are read from a Google News search, and its links are Google News redirect links. The Feed Status block shows which feeds are working.</dd>
             </div>
             <div>
               <dt>Fetch / Refresh</dt>
-              <dd>Nothing loads until you click it (filter icon, top right). It reads every outlet's feed and checks where each story ranks on Google News. It shows "Fetch" first, and after a filter change. It shows "Refresh" when data is already on screen.</dd>
+              <dd>Nothing loads until you click it (filter icon, top right). It reads every outlet's feed, checks where each story ranks on Google News, and checks Google Trends for matching searches. It shows "Fetch" first, and again after you change a filter or the time window. It shows "Refresh" when data is already on screen. While it works, the button shows a spinner.</dd>
             </div>
             <div>
               <dt>The four small numbers</dt>
-              <dd>How many DH stories and competitor stories are loaded, how many topic groups they form, and how many coverage gaps there are (topics competitors have that DH does not).</dd>
+              <dd>How many DH stories and competitor stories are inside the chosen time window, how many topic groups they form, and how many coverage gaps there are (topics competitors have that DH does not).</dd>
             </div>
             <div>
               <dt>Top Keywords</dt>
@@ -199,17 +172,17 @@
             </div>
             <div>
               <dt>Trending Topics</dt>
-              <dd>Stories that share at least two key words are grouped as one topic. The biggest groups are the trending ones. The chips show which outlets covered it, and how many stories are DH's and how many are competitors'. Hover any chip to see the stories.</dd>
+              <dd>Stories that share at least two key words are grouped as one topic. The biggest groups are the trending ones. Each row has three columns: the <strong>topic</strong> (with its main words underneath), the <strong>stories</strong> (the total, how many are DH's and how many are competitors'), and the <strong>competitor outlets</strong> that covered it. Hover a count or an outlet name to see its stories, and click a headline to open it.</dd>
             </div>
             <div>
               <dt>Competitor Coverage</dt>
-              <dd>Compares outlets topic by topic. <strong>Gap</strong> means competitors have the story and DH does not. <strong>Covered</strong> means DH and a competitor both have it. <strong>DH exclusive</strong> means only DH has it. The number in a box is how many stories that outlet has on the topic. <strong>G#3</strong> means its best Google News position was 3rd. Use the dropdown to switch between top trending topics and all topics.</dd>
+              <dd>Compares outlets topic by topic, one column per outlet. <strong>Gap</strong> means competitors have the story and DH does not. <strong>Covered</strong> means DH and a competitor both have it. <strong>DH exclusive</strong> means only DH has it. The number in a box is how many stories that outlet has on the topic; hover it, or the status label, to see those stories and click one to open it. <strong>G#3</strong> means its best Google News position was 3rd. The dropdown on the left switches between top trending topics (the default), all topics, or everything except the top trending ones, and the buttons beside it filter by status. When the table is wider than the screen, scroll sideways: the Topic column stays in view. The <strong>copy icon</strong> at the end of each row copies a ready-made prompt plus the story links, grouped under each outlet's name, so you can paste it into an AI tool to compare the stories and get ideas for making DH's version stronger.</dd>
             </div>
             <div class="guide-wide">
               <dt>How Google News ranking works here</dt>
               <dd>
                 <ul>
-                  <li><strong>What is checked:</strong> when you click Fetch, the dashboard asks Google News (India, English) for its Top stories, for a "Karnataka or Bengaluru" search from the last day, and for one search per each of the 12 biggest topics (their three main words, last two days). That is up to 14 lookups.</li>
+                  <li><strong>What is checked:</strong> when you click Fetch, the dashboard asks Google News (India, English) for its Top stories, for a "Karnataka or Bengaluru" search from the last day, and for one search per each of the 12 biggest topics (their three main words, last day). That is up to 14 lookups.</li>
                   <li><strong>What "rank" means:</strong> the position of a story in the list Google returns, in Google's own order. <strong>#1 is the top result</strong>, so a lower number is better. Only the first results Google returns (up to about 100) are looked at.</li>
                   <li><strong>How a story is matched:</strong> a story counts as found when the same outlet appears in the Google list with a headline that shares most of its key words (at least 60%). If it shows up in several lookups, its best (lowest) position is kept.</li>
                   <li><strong>Where you see it:</strong> a blue <strong>Google News #n</strong> badge on a story card (hover it to see which lookup found it); a small <strong>G#n</strong> under an outlet's number in Competitor Coverage, which is the best position among that outlet's stories on the topic; and a summary line there such as "DH 5/35 stories ranked", meaning 5 of 35 DH stories were found.</li>
@@ -230,18 +203,18 @@
               </dd>
             </div>
             <div>
-              <dt>Latest Stories</dt>
-              <dd>The newest headlines. An orange <strong>Trending</strong> label means the story belongs to one of the top trending topics (hover it to see which). The blue badge shows its Google News position when it was found. "Read more" shows the text the feed provides, which is sometimes only a short summary. "Open in browser" goes to the full article.</dd>
+              <dt>Feed Status</dt>
+              <dd>The block above this guide. A red or amber banner says in plain words when a feed is blocked, rate-limited or not loading, or when Google News or Google Trends could not be reached. Each outlet's row shows whether it is working and the time span its feed covers. Stories from a feed that is not working are missing from every number on the page.</dd>
             </div>
             <div>
-              <dt>Missing Angles, Follow-ups, Explainers</dt>
-              <dd>Ideas generated by simple rules from the topic groups, not by an editor or AI. Treat them as prompts to consider.</dd>
+              <dt>Latest Stories</dt>
+              <dd>Every story inside the chosen time window, newest first by default, each with a small thumbnail beside its outlet and time. Use the Outlet, Show and Sort by dropdowns to narrow or reorder the list, and the page buttons to move through it (the <strong>Show</strong> dropdown can list only the stories matched to a Google Trends search). An orange <strong>In a top topic</strong> label means the story belongs to one of the biggest topic groups shown in Trending Topics (hover it to see which). It describes the topic, not how many people are reading the story. The blue badge shows its Google News position when it was found. "Read more" shows the text the feed provides, which is sometimes only a short summary. "Open in browser" goes to the full article.</dd>
             </div>
           </dl>
         </section>
       </main>
     </div>
 
-    <script src="./app.js"></script>
+    <script src="./app.js?v=20261118e"></script>
   </body>
 </html>

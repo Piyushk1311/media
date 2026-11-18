@@ -795,3 +795,91 @@ body { background: var(--paper); }
 /* Google Trends marker */
 .badge.gt { color: #fff; background: #6d28d9; }
 .trend-tag.search { color: #4c1d95; background: #ede4ff; }
+
+/* Latest Stories: filter / sort controls and pagination */
+.story-controls { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-bottom: 12px; }
+.story-controls label { display: flex; align-items: center; gap: 8px; color: #4f5b69; font-size: 12px; font-weight: 800; letter-spacing: 0; text-transform: none; }
+.story-controls .cov-select { min-width: 0; max-width: 100%; }
+.pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
+.pager-info { color: #4f5b69; font-size: 13px; }
+.pager-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pg { min-width: 34px; min-height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; color: #2e3b48; background: #fff; font-size: 13px; font-weight: 700; }
+.pg:hover:not(:disabled) { background: #f5f7f9; }
+.pg.active { color: #fff; background: var(--ink); border-color: var(--ink); }
+.pg:disabled { opacity: 0.45; cursor: not-allowed; }
+.pg-gap { padding: 0 4px; color: #4f5b69; }
+
+/* Latest Stories: small thumbnail (1/4 of the old area) beside the badges, text below it */
+.story-list { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.story { display: grid; grid-template-columns: 150px minmax(0, 1fr); column-gap: 10px; row-gap: 6px; padding: 10px; align-items: start; }
+.story .story-body { display: contents; }
+.story .hero { grid-column: 1; grid-row: 1; width: 150px; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; }
+.story .story-meta { grid-column: 2; grid-row: 1; margin: 0; align-content: start; }
+.story h4, .story .story-text, .story .badge-row, .story .story-actions { grid-column: 1 / -1; margin: 0; }
+.story h4 { font-size: 14px; line-height: 1.3; }
+.story .badge-row { margin-top: 0; }
+.story-actions { margin-top: 2px; }
+@media (max-width: 1280px) { .story-list { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 980px)  { .story-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px)  { .story-list { grid-template-columns: 1fr; } }
+@media (max-width: 400px)  { .story { grid-template-columns: 110px minmax(0, 1fr); } .story .hero { width: 110px; } }
+
+/* Coverage copy icon; Fetch button alone in the filter popover */
+.controls .actions { grid-template-columns: 1fr; }
+.cov-table .status-cell { white-space: nowrap; }
+.cov-copy {
+  display: inline-grid; place-items: center; width: 30px; min-height: 30px; height: 30px; margin-left: 8px; padding: 0;
+  border: 1px solid var(--line); border-radius: 8px; color: #2e3b48; background: #fff; vertical-align: middle;
+}
+.cov-copy:hover { background: #f5f7f9; color: var(--blue); }
+.cov-copy.copied { color: #fff; background: #1f9d55; border-color: #1f9d55; }
+
+/* Copy icon: own column pinned to the right end of each row */
+.cov-table th.copy-col, .cov-table td.copy-cell { width: 1%; padding-left: 4px; padding-right: 12px; text-align: right; white-space: nowrap; }
+.cov-table td.copy-cell .cov-copy { margin-left: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/* Competitor Coverage: sticky Topic column, the other columns scroll sideways under it */
+.cov-table th[scope="row"], .cov-table thead th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #fff;
+  box-shadow: 1px 0 0 var(--line), 6px 0 8px -6px rgba(23, 33, 43, 0.25);
+}
+.cov-table thead th:first-child { z-index: 4; background: #f5f7f9; }
+.cov-table thead th { z-index: 3; }
+.cov-table tbody tr.row-gap th[scope="row"] { background: #fff6f6; }
+@media (max-width: 760px) {
+  .cov-table th[scope="row"], .cov-table thead th:first-child { min-width: 150px; max-width: 170px; white-space: normal; }
+}
+
+/* Trending Topics: wrap onto a second line when a row's content does not fit (nothing is clipped) */
+.topic { flex-wrap: wrap; white-space: normal; overflow: visible; row-gap: 6px; }
+.topic .platform-row { flex: 0 1 auto; flex-wrap: wrap; }
+.topic .badge-row { flex: 1 1 auto; flex-wrap: wrap; overflow: visible; min-width: 0; }
+.topic .badge, .topic .platform { white-space: nowrap; }
+
+/* Trending Topics as three columns: Topic | Stories (total, DH, competitors) | Competitor outlets */
+.topic-list .topic {
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) auto minmax(0, 2.2fr);
+  column-gap: 18px;
+  align-items: start;
+  white-space: normal;
+  overflow: visible;
+  padding: 10px 14px;
+}
+.topic .tcol-topic h4 { overflow: visible; text-overflow: clip; white-space: normal; font-size: 14px; line-height: 1.3; min-width: 0; flex: none; }
+.topic .tkeys { margin: 3px 0 0; color: #4f5b69; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topic .tcol-counts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.topic .tcol-outlets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.topic .tcol-counts .badge, .topic .tcol-outlets .platform { white-space: nowrap; }
+.topic-none { color: #4f5b69; font-size: 12px; }
+@media (max-width: 900px) {
+  .topic-list .topic { grid-template-columns: 1fr; row-gap: 8px; }
+  }
+
+/* Header branding in teal */
+.brand-mark { color: var(--teal); background: #e3f3f1; border: 1px solid var(--teal); }
+.brand p.kicker { color: var(--teal); }
