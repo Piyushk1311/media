@@ -1,66 +1,77 @@
 const SOURCES = [
   {
     id: "dh",
+    site: "deccanherald.com",
     name: "Deccan Herald",
     type: "primary",
     rss: "https://www.deccanherald.com/api/v1/collections/latest-news.rss"
   },
   {
     id: "hindu",
+    site: "thehindu.com",
     name: "The Hindu",
     type: "competitor",
     rss: "https://www.thehindu.com/feeder/default.rss"
   },
   {
     id: "quint",
+    site: "thequint.com",
     name: "The Quint",
     type: "competitor",
     rss: "https://www.thequint.com/feed"
   },
   {
     id: "toi",
+    site: "timesofindia.indiatimes.com",
     name: "Times of India",
     type: "competitor",
     rss: "https://timesofindia.indiatimes.com/rssfeedmostrecent.cms"
   },
   {
     id: "ndtv",
+    site: "ndtv.com",
     name: "NDTV",
     type: "competitor",
     rss: "https://feeds.feedburner.com/ndtvnews-latest"
   },
   {
     id: "india-today",
+    site: "indiatoday.in",
     name: "India Today",
     type: "competitor",
     rss: "https://www.indiatoday.in/rss/home"
   },
   {
     id: "ht",
+    site: "hindustantimes.com",
     name: "Hindustan Times",
     type: "competitor",
     rss: "https://www.hindustantimes.com/feeds/rss/latest/rssfeed.xml"
   },
   {
     id: "iexp",
+    site: "indianexpress.com",
     name: "Indian Express",
     type: "competitor",
     rss: "https://indianexpress.com/feed/"
   },
   {
     id: "dchron",
+    site: "deccanchronicle.com",
     name: "Deccan Chronicle",
     type: "competitor",
     rss: "https://www.deccanchronicle.com/rss_feed"
   },
   {
     id: "tnm",
+    site: "thenewsminute.com",
     name: "The News Minute",
     type: "competitor",
     rss: "https://www.thenewsminute.com/feed"
   },
   {
     id: "mint",
+    site: "livemint.com",
     name: "Livemint",
     type: "competitor",
     gnNames: ["Mint"], // how Google News spells this outlet
@@ -68,12 +79,14 @@ const SOURCES = [
   },
   {
     id: "news18",
+    site: "news18.com",
     name: "News18",
     type: "competitor",
     rss: ["india", "world", "politics", "business", "sports", "movies", "tech", "lifestyle-2"].map((section) => `https://www.news18.com/commonfeeds/v1/eng/rss/${section}.xml`)
   },
   {
     id: "et",
+    site: "economictimes.indiatimes.com",
     name: "Economic Times",
     type: "competitor",
     rss: "https://economictimes.indiatimes.com/rssfeedsdefault.cms"
@@ -347,6 +360,10 @@ async function fetchOneFeed(source, feedUrl) {
 
 const MERGED_LIMIT = 50;
 
+function gnSiteSearchUrl(site) {
+  return `https://news.google.com/rss/search?q=${encodeURIComponent(`site:${site} when:1d`)}&hl=en-IN&gl=IN&ceid=${encodeURIComponent("IN:en")}`;
+}
+
 async function fetchFeed(source) {
   const feeds = Array.isArray(source.rss) ? source.rss : [source.rss];
   if (feeds.length === 1) return fetchOneFeed(source, feeds[0]);
@@ -533,7 +550,7 @@ function saveTrendsSummary() {
 
 // On a developer's computer the page reads feeds live (through server.py). On the published site
 // (GitHub Pages) browsers cannot read news feeds, so it reads data/snapshot.json, which a scheduled
-// GitHub Action refreshes about every 30 minutes.
+// GitHub Action refreshes about every hour.
 const LIVE_MODE = location.protocol === "file:" || ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
 let snapshotNote = "";
 
@@ -554,7 +571,7 @@ async function refreshFromSnapshot() {
     gnSummary = snapshot.gnSummary || null;
     trendsSummary = snapshot.trendsSummary || null;
     hasFetchedData = true;
-    snapshotNote = ` Data collected ${formatDate.format(new Date(generatedAt))} and refreshed about every 30 minutes.`;
+    snapshotNote = ` Data collected ${formatDate.format(new Date(generatedAt))} and refreshed about every hour.`;
   } catch (error) {
     snapshotNote = "";
     els.statusText.textContent = "The saved data could not be loaded. Try again in a few minutes.";
@@ -580,13 +597,22 @@ async function refreshFeeds() {
     try {
       return { source, parsed: await fetchFeed(source) };
     } catch (error) {
+      // The outlet's own feed is blocked or broken: fall back to a Google News search of its website.
+      if (source.site && source.kind !== "googlenews") {
+        try {
+          const backup = { ...source, kind: "googlenews", rss: gnSiteSearchUrl(source.site) };
+          return { source, parsed: await fetchFeed(backup), via: "Google News search", ownError: error.message };
+        } catch {
+          /* fall through to the original error */
+        }
+      }
       return { source, error };
     }
   });
-  for (const { source, parsed, error } of outcomes) {
+  for (const { source, parsed, error, via, ownError } of outcomes) {
     if (parsed) {
       articles.push(...parsed);
-      health.push({ sourceId: source.id, name: source.name, ok: true, count: parsed.length });
+      health.push({ sourceId: source.id, name: source.name, ok: true, count: parsed.length, via, ownError });
     } else {
       health.push({ sourceId: source.id, name: source.name, ok: false, count: 0, error: error.message });
     }
@@ -849,13 +875,13 @@ function renderUpdated() {
     return;
   }
   const minutes = (Date.now() - Date.parse(generatedAt)) / 60000;
-  const stale = minutes > 120;
+  const stale = minutes > 180;
   els.updatedTime.textContent = formatDate.format(new Date(generatedAt));
   els.updatedAgo.textContent = timeAgo(generatedAt);
   els.updatedChip.classList.toggle("stale", stale);
   els.updatedChip.title = stale
-    ? "This data is more than 2 hours old. The scheduled update may be delayed."
-    : LIVE_MODE ? "When you last fetched the feeds." : "The data is collected automatically about every 30 minutes.";
+    ? "This data is more than 3 hours old. The scheduled update may be delayed."
+    : LIVE_MODE ? "When you last fetched the feeds." : "The data is collected automatically about every hour.";
 }
 
 function render({ articles, insights, status, refreshInProgress }) {
@@ -1090,6 +1116,10 @@ function renderFeedHealth() {
         ? ` · covers ${formatDate.format(new Date(Math.min(...times)))} to ${formatDate.format(new Date(Math.max(...times)))}`
         : "";
       text = `Working · ${health.count} stories${range}`;
+      if (health.via) {
+        text = `Working through a ${health.via} (its own feed failed) · ${health.count} stories${range}`;
+        warnings.push({ level: "warn", name: source.name, text: `Its own feed failed (${describeFeedError(health.ownError).replace(/ Its stories are missing from every count\./, "")}), so its stories come from a ${health.via}. Links are Google News redirect links and there are no summaries.` });
+      }
     } else if (health) {
       state = "bad";
       text = describeFeedError(health.error);

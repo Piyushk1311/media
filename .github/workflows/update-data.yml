@@ -4,7 +4,8 @@ name: Update data
 # GitHub Pages site (which cannot read them from the browser) only has to read data/snapshot.json.
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    # Hourly, at an off-peak minute on purpose: GitHub delays or drops scheduled runs at :00 and :30.
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:
